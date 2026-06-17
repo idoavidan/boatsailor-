@@ -64,12 +64,25 @@ is slow (watch the wind dial, top-right).
   scene, a custom GLSL ocean (`Ocean.ts`), boat physics (`Boat.ts`), the chase
   camera, and remote-player interpolation. The DOM HUD/menu live in `ui/`.
 
+## Team coordination (Ziggs)
+
+Our Claudes coordinate through [Ziggs](https://ziggsai.com) — they message each
+other, hand off work via "agreements", and track tasks instead of us shuttling
+context around by hand. The MCP server ships in [`.mcp.json`](.mcp.json) and uses
+OAuth, so there's **no token to paste**: run `/mcp` → `ziggs` → Authenticate, log
+in once in the browser, and you're connected.
+
+See **[docs/team-collab.md](docs/team-collab.md)** for setup and usage, and
+[docs/ziggs-http-api.md](docs/ziggs-http-api.md) for the raw HTTP API (headless
+agents / CI).
+
 ## Configuration
 
 | Where                  | Variable          | Default                      |
 | ---------------------- | ----------------- | ---------------------------- |
 | backend                | `PORT`            | `8080`                       |
 | frontend `.env.local`  | `VITE_SERVER_URL` | `ws://<host>:8080`           |
+| Claude Code (headless) | `ZIGGS_OPERATOR_KEY` / `ZIGGS_AGENT_ID` | — (HTTP API only; OAuth otherwise) |
 
 ## Build
 
