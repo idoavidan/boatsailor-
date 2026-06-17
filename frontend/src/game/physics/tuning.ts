@@ -12,9 +12,9 @@ export interface PhysicsTuning {
   inertia: number;
 
   // Sail (thrust from wind)
-  sailPower: number; // peak thrust at full throttle, downwind, unit wind
-  minWindFactor: number; // thrust multiplier sailing straight into the wind
-  windInfluence: number; // 0 = wind direction ignored, 1 = it fully matters
+  sailPower: number; // peak thrust at full throttle, on a reach, unit wind
+  noGoAngle: number; // radians off dead-upwind before the sail starts to draw
+  sailFloor: number; // residual drive in the no-go zone (so upwind is very slow)
 
   // Hull (water drag)
   forwardDrag: number; // resistance along the bow (with sailPower sets top speed)
@@ -25,6 +25,7 @@ export interface PhysicsTuning {
   turnTorque: number; // rudder authority
   yawDamping: number; // settles the turn rate (no endless spin)
   steerSpeedRef: number; // speed at which the rudder is fully effective
+  weatherHelm: number; // tendency to round up into the wind (sailing character)
 
   // Environment coupling
   currentCoupling: number; // how strongly water current drags the boat
@@ -37,15 +38,16 @@ export interface PhysicsTuning {
 export const CASUAL_TUNING: PhysicsTuning = {
   mass: 1,
   inertia: 1,
-  sailPower: 63, // 63 / 0.9 ≈ 70 top speed
-  minWindFactor: 0.55,
-  windInfluence: 0.4,
+  sailPower: 63, // 63 / 0.9 ≈ 70 top speed on a reach
+  noGoAngle: 0.6, // ~34° — can't point closer than this to the wind
+  sailFloor: 0.12, // forgiving: still creeps upwind
   forwardDrag: 0.9,
   lateralDrag: 5,
   brakeDrag: 2.5,
-  turnTorque: 4.5, // 4.5 / 3 = 1.5 rad/s turn
+  turnTorque: 4.2, // ~1.4 rad/s turn
   yawDamping: 3,
   steerSpeedRef: 32,
+  weatherHelm: 0.3,
   currentCoupling: 0, // current off until a map enables it
   wavePush: 4,
   maxSpeed: 70,
@@ -54,15 +56,16 @@ export const CASUAL_TUNING: PhysicsTuning = {
 export const SPEED_TUNING: PhysicsTuning = {
   mass: 1,
   inertia: 1.1,
-  sailPower: 99, // 99 / 0.9 = 110 top speed
-  minWindFactor: 0.5,
-  windInfluence: 0.5,
+  sailPower: 99, // 99 / 0.9 = 110 top speed on a reach
+  noGoAngle: 0.68, // ~39° — racier, punishes pinching harder
+  sailFloor: 0.06, // dead upwind is nearly stalled — you must tack
   forwardDrag: 0.9,
   lateralDrag: 6,
   brakeDrag: 3,
-  turnTorque: 5.4, // 5.4 / 3 = 1.8 rad/s turn
+  turnTorque: 5.0, // ~1.7 rad/s turn
   yawDamping: 3,
   steerSpeedRef: 40,
+  weatherHelm: 0.4,
   currentCoupling: 0,
   wavePush: 4,
   maxSpeed: 110,

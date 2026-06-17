@@ -5,14 +5,17 @@ import { BoatInput, EnvSample, ForceAccumulator } from "../types";
 import { Force } from "./Force";
 
 /**
- * The engine of the boat: the sail turns wind into forward thrust. Thrust is
- * strongest sailing with the wind and weakest (but never zero) sailing into it,
- * scaled by throttle (how much sail is up) and the *local* wind strength — so
- * gusts and wind shifts directly change your speed.
+ * The engine of the boat: the sail turns wind into forward thrust, following a
+ * simple sailing polar.
  *
- * This mirrors the old `windFactor` curve, re-expressed as a force so it feeds
- * momentum instead of setting speed directly. A fuller model would use apparent
- * wind and a real lift/drag polar; this keeps it arcade and predictable.
+ *   - Point within `noGoAngle` of straight upwind and the sail luffs — almost no
+ *     drive (`sailFloor`), so you crawl. To make ground upwind you must tack
+ *     (zig-zag across the wind).
+ *   - Bear away onto a reach (~beam-on) and the sail fills for full power.
+ *   - Running downwind also draws well.
+ *
+ * Thrust scales by throttle (how much sail is up) and the local wind strength,
+ * so gusts and shifts change your speed.
  */
 export class SailForce implements Force {
   readonly name = "sail";
@@ -31,13 +34,18 @@ export class SailForce implements Force {
     if (input.throttle <= 0 || env.windSpeed <= 0) return;
 
     this.fwd.set(Math.sin(boat.heading), Math.cos(boat.heading));
-    this.windDir.copy(env.wind).divideScalar(env.windSpeed); // normalized
+    this.windDir.copy(env.wind).divideScalar(env.windSpeed); // blowing-toward
 
-    const dot = this.fwd.dot(this.windDir); // 1 downwind, -1 into the wind
-    const align = THREE.MathUtils.lerp(this.t.minWindFactor, 1, (dot + 1) / 2);
-    const eff = THREE.MathUtils.lerp(1, align, this.t.windInfluence);
+    // Apparent wind angle off the bow: 0 = pointing straight into the wind
+    // (no-go), π = running dead downwind.
+    const awa = Math.acos(THREE.MathUtils.clamp(-this.fwd.dot(this.windDir), -1, 1));
+    const draw = THREE.MathUtils.lerp(
+      this.t.sailFloor,
+      1,
+      THREE.MathUtils.smoothstep(awa, this.t.noGoAngle, this.t.noGoAngle + 0.5),
+    );
 
-    const thrust = this.t.sailPower * input.throttle * eff * env.windSpeed;
+    const thrust = this.t.sailPower * input.throttle * draw * env.windSpeed;
     acc.force.addScaledVector(this.fwd, thrust);
   }
 }

@@ -9,7 +9,10 @@ export class HUD {
   private root = el("hud");
   private modeBadge = el("mode-badge");
   private players = el("players");
-  private windArrow = el("wind-arrow");
+  private windEl = el("wind");
+  private windDial = el("wind-dial");
+  private windNeedle = el("wind-needle");
+  private dialBoom = el("dial-boom");
   private banner = el("race-banner");
   private raceInfo = el("race-info");
   private standings = el("standings");
@@ -33,9 +36,47 @@ export class HUD {
       <div class="speed-bar"><div style="width:${pct}%"></div></div>`;
   }
 
-  /** angle = wind direction relative to the boat heading, radians. */
-  setWind(angle: number): void {
-    this.windArrow.style.transform = `rotate(${angle}rad)`;
+  /**
+   * Paint the dial as a polar speed gauge from the boat's sailing polar: red in
+   * the no-go zone (±noGoAngle around the bow), warming through orange/yellow to
+   * green on a reach. The red wedge is exactly the real no-go, so the gauge is
+   * 1:1 with how the boat actually sails. Call once per game.
+   */
+  setPolar(noGoAngle: number): void {
+    const n = (noGoAngle * 180) / Math.PI;
+    this.windDial.style.background = `conic-gradient(from 0deg,
+      #e25555 0deg, #e25555 ${n}deg,
+      #ef9a4a ${n + 12}deg,
+      #f2cf63 ${n + 34}deg,
+      #5ec98a 88deg,
+      #43b877 150deg,
+      #57bdbf 180deg,
+      #43b877 210deg,
+      #5ec98a 272deg,
+      #f2cf63 ${360 - n - 34}deg,
+      #ef9a4a ${360 - n - 12}deg,
+      #e25555 ${360 - n}deg, #e25555 360deg)`;
+  }
+
+  /**
+   * Orbit the wind arrow around the boat to the bearing the wind comes FROM
+   * (relative to the bow, up), where it points in toward the boat — so it reads
+   * as wind blowing onto you, and the colour under it is your speed. `inIrons`
+   * rings the dial red when you're pointing inside the no-go zone.
+   */
+  setWind(fromAngle: number, inIrons: boolean): void {
+    // Negate so the dial's left/right matches the chase view (starboard right).
+    const deg = (-fromAngle * 180) / Math.PI;
+    this.windNeedle.setAttribute("transform", `rotate(${deg} 50 50)`);
+    this.windEl.classList.toggle("in-irons", inIrons);
+  }
+
+  /** Swing the dial's boom out to the trimmed side. `boomAngle` is the rig's
+   *  signed ease in radians (the same value that trims the 3D sail). */
+  setBoom(boomAngle: number): void {
+    // Same handedness flip as the needle, so the dial boom matches the boat's.
+    const deg = (-boomAngle * 180) / Math.PI;
+    this.dialBoom.setAttribute("transform", `rotate(${deg} 50 45)`);
   }
 
   /** Update the race banner / lap / timer / standings for speed mode. */

@@ -42,7 +42,23 @@
       </div>
 
       <div id="wind">
-        <div id="wind-arrow">↑</div>
+        <!-- polar speed gauge: red near the wind (slow/no-go) → green on a reach -->
+        <div id="wind-dial">
+          <svg id="wind-face" viewBox="0 0 100 100" aria-hidden="true">
+            <!-- your boat, bow up (= your heading / where you look) -->
+            <polygon class="wd-boat" points="50,38 43,62 57,62" />
+            <!-- the boom/sail, swinging out to the trimmed (leeward) side -->
+            <g id="dial-boom">
+              <line class="wd-boom" x1="50" y1="45" x2="50" y2="62" />
+            </g>
+            <!-- wind arrow sits on the rim where the wind comes from and blows
+                 IN toward the boat (it orbits the boat as the wind shifts) -->
+            <g id="wind-needle">
+              <line class="wd-needle" x1="50" y1="11" x2="50" y2="23" />
+              <polygon class="wd-needle-head" points="50,35 42,22 58,22" />
+            </g>
+          </svg>
+        </div>
         <span>wind</span>
       </div>
 

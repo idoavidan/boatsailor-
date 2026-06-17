@@ -57,10 +57,11 @@ export function createBoatMesh(color: number): THREE.Group {
   sailShape.lineTo(-5, 0);
   sailShape.lineTo(0, 0);
   const sail = new THREE.Mesh(new THREE.ShapeGeometry(sailShape), sailMat);
-  // -PI/2 so the boom trails aft (toward -Z, the stern); +PI/2 would push the
-  // sail out over the bow.
+  // -PI/2 so the boom trails aft (toward -Z, the stern); the rig animates this
+  // each frame to trim the sail to the wind.
   sail.rotation.y = -Math.PI / 2;
   sail.position.set(0, 1.8, 0.5);
+  sail.name = "mainsail";
   group.add(sail);
 
   // Jib (front sail)
@@ -72,6 +73,7 @@ export function createBoatMesh(color: number): THREE.Group {
   const jib = new THREE.Mesh(new THREE.ShapeGeometry(jibShape), sailMat);
   jib.rotation.y = Math.PI / 2;
   jib.position.set(0, 1.6, 4.5);
+  jib.name = "jib";
   group.add(jib);
 
   // Flag at the masthead, tinted to the hull color.

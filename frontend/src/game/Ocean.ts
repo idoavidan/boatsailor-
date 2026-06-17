@@ -8,40 +8,47 @@ interface WaveSpec {
 }
 
 /**
- * The directional waves summed to form the surface. This single spec drives
- * both the GLSL vertex shader (rendering) and {@link Ocean.sample} (so boats
- * ride the exact same surface the player sees — no drift between the two).
+ * Wave layers as small angular offsets (radians) from the wind direction. The
+ * swell travels broadly *with* the wind; the slightly different angles +
+ * wavelengths interfere so each crest runs long then ends (finite wavefronts,
+ * not infinite parallel lines). Widen the offsets for shorter crests.
  */
-// A few waves clustered in a NARROW angular cone around one dominant direction.
-// They share a clear travel direction (so the swell reads as directional lines),
-// but their slightly different angles + wavelengths interfere so each crest runs
-// long and then ends — finite wavefronts, not infinite parallel lines. Widen the
-// angular spread for shorter crests; tighten it for longer ones.
-const WAVES: WaveSpec[] = [
-  { dir: new THREE.Vector2(1.0, 0.28).normalize(), freq: 0.042, amp: 2.5, speed: 1.5 },
-  { dir: new THREE.Vector2(1.0, 0.12).normalize(), freq: 0.061, amp: 1.4, speed: 1.8 },
-  { dir: new THREE.Vector2(1.0, 0.46).normalize(), freq: 0.083, amp: 0.9, speed: 2.0 },
-  { dir: new THREE.Vector2(1.0, 0.33).normalize(), freq: 0.1, amp: 0.4, speed: 2.5 },
+interface WaveLayer {
+  offset: number; // angle off the wind direction
+  freq: number;
+  amp: number;
+  speed: number;
+}
+const WAVE_LAYERS: WaveLayer[] = [
+  { offset: -0.01, freq: 0.042, amp: 2.5, speed: 1.5 },
+  { offset: -0.16, freq: 0.061, amp: 1.4, speed: 1.8 },
+  { offset: 0.15, freq: 0.083, amp: 0.9, speed: 2.0 },
+  { offset: 0.04, freq: 0.1, amp: 0.4, speed: 2.5 },
 ];
 
 /** Peak possible crest height (all waves in phase) — used to place foam. */
-const WAVE_MAX = WAVES.reduce((sum, w) => sum + w.amp, 0);
+const WAVE_MAX = WAVE_LAYERS.reduce((sum, w) => sum + w.amp, 0);
+
+/** Build the concrete wave set, rotating each layer off the wind direction. */
+function buildWaves(windDir: THREE.Vector2): WaveSpec[] {
+  const w = windDir.clone().normalize();
+  return WAVE_LAYERS.map((l) => {
+    const c = Math.cos(l.offset);
+    const s = Math.sin(l.offset);
+    return {
+      dir: new THREE.Vector2(w.x * c - w.y * s, w.x * s + w.y * c),
+      freq: l.freq,
+      amp: l.amp,
+      speed: l.speed,
+    };
+  });
+}
 
 /** Format a JS number as a GLSL float literal (always has a decimal point). */
 function glslFloat(n: number): string {
   const s = String(n);
   return /[.e]/.test(s) ? s : s + ".0";
 }
-
-// Generate the shader's wave accumulation from WAVES so it can never drift
-// from the JS sampler below.
-const WAVE_SLOPES = WAVES.map((_, i) => `s${i}`).join(", ");
-const WAVE_SUM = WAVES.map((_, i) => `s${i}`).join(" + ");
-const WAVE_CALLS = WAVES.map(
-  (w, i) =>
-    `h += wave(p, vec2(${glslFloat(w.dir.x)}, ${glslFloat(w.dir.y)}), ` +
-    `${glslFloat(w.freq)}, ${glslFloat(w.amp)}, ${glslFloat(w.speed)}, s${i});`,
-).join("\n          ");
 
 /**
  * A large animated ocean plane. Self-contained GLSL (no texture assets):
@@ -52,8 +59,29 @@ const WAVE_CALLS = WAVES.map(
 export class Ocean {
   readonly mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
+  private waves: WaveSpec[];
 
-  constructor(size: number, skyColor: THREE.Color, sunDir: THREE.Vector3) {
+  constructor(
+    size: number,
+    skyColor: THREE.Color,
+    sunDir: THREE.Vector3,
+    windDir: THREE.Vector2,
+  ) {
+    // Waves travel with the wind so the swell and the sailing line up.
+    this.waves = buildWaves(windDir);
+
+    // Generate the shader's wave accumulation from the same spec the JS sampler
+    // uses, so rendering and physics can never drift.
+    const slopeDecl = this.waves.map((_, i) => `s${i}`).join(", ");
+    const slopeSum = this.waves.map((_, i) => `s${i}`).join(" + ");
+    const waveCalls = this.waves
+      .map(
+        (w, i) =>
+          `h += wave(p, vec2(${glslFloat(w.dir.x)}, ${glslFloat(w.dir.y)}), ` +
+          `${glslFloat(w.freq)}, ${glslFloat(w.amp)}, ${glslFloat(w.speed)}, s${i});`,
+      )
+      .join("\n          ");
+
     // High tessellation so the short, steep swells stay smooth, not faceted.
     const geometry = new THREE.PlaneGeometry(size, size, 512, 512);
     geometry.rotateX(-Math.PI / 2); // lie flat in the XZ plane
@@ -80,7 +108,8 @@ export class Ocean {
 
         // One directional wave + its contribution to the surface slope.
         float wave(vec2 p, vec2 dir, float freq, float amp, float speed, out vec2 slope) {
-          float phase = dot(dir, p) * freq + uTime * speed;
+          // minus uTime so crests travel toward +dir (with the wind), not against it
+          float phase = dot(dir, p) * freq - uTime * speed;
           slope = amp * freq * dir * cos(phase);
           return amp * sin(phase);
         }
@@ -90,12 +119,12 @@ export class Ocean {
           // the mesh is recentered under the camera each frame.
           vec4 world = modelMatrix * vec4(position, 1.0);
           vec2 p = world.xz;
-          vec2 ${WAVE_SLOPES};
+          vec2 ${slopeDecl};
           float h = 0.0;
-          ${WAVE_CALLS}
+          ${waveCalls}
           world.y += h;
 
-          vec2 slope = ${WAVE_SUM};
+          vec2 slope = ${slopeSum};
           // Exaggerate the slope for the lighting normal ONLY (geometry + the JS
           // sampler keep the true height, so boats still sit right) so the wave
           // faces read as steep, sharply-lit lines.
@@ -183,8 +212,8 @@ export class Ocean {
   sample(x: number, z: number, time: number, outSlope?: THREE.Vector2): number {
     let h = 0;
     if (outSlope) outSlope.set(0, 0);
-    for (const w of WAVES) {
-      const phase = (w.dir.x * x + w.dir.y * z) * w.freq + time * w.speed;
+    for (const w of this.waves) {
+      const phase = (w.dir.x * x + w.dir.y * z) * w.freq - time * w.speed;
       h += w.amp * Math.sin(phase);
       if (outSlope) {
         const c = w.amp * w.freq * Math.cos(phase);

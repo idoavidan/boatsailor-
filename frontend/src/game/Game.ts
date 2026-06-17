@@ -61,6 +61,9 @@ export class Game {
   private body!: BoatState; // alias of physics.boat (the dynamic state)
   private boat: THREE.Group;
   private wake!: Wake;
+  private mainsail: THREE.Object3D | null = null;
+  private jib: THREE.Object3D | null = null;
+  private boomAngle = 0; // smoothed boom ease, radians (signed: leeward side)
 
   private remotes = new Map<string, RemoteBoat>();
 
@@ -126,7 +129,7 @@ export class Game {
     sun.position.copy(SUN_DIR).multiplyScalar(500);
     this.scene.add(sun);
 
-    this.ocean = new Ocean(WORLD.bounds * 6, SKY_COLOR, SUN_DIR);
+    this.ocean = new Ocean(WORLD.bounds * 6, SKY_COLOR, SUN_DIR, WIND_DIR);
     this.scene.add(this.ocean.mesh);
 
     // --- Local boat physics ---
@@ -141,6 +144,8 @@ export class Game {
     this.body = this.physics.boat;
 
     this.boat = createBoatMesh(welcome.color);
+    this.mainsail = this.boat.getObjectByName("mainsail") ?? null;
+    this.jib = this.boat.getObjectByName("jib") ?? null;
     this.scene.add(this.boat);
 
     this.wake = new Wake();
@@ -183,6 +188,9 @@ export class Game {
     // --- Controls / HUD ---
     this.controls = new Controls(window);
     this.hud.show(this.mode);
+    this.hud.setPolar(
+      (this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING).noGoAngle,
+    );
 
     // Seed existing players and race state.
     for (const p of welcome.players) this.addRemote(p);
@@ -340,6 +348,7 @@ export class Game {
     const input = this.controls.sample();
     this.physics.step(input, dt, time);
     this.applyLocalBoatTransform(input, time);
+    this.updateRig(time);
     this.wake.update(
       this.body.x,
       this.body.z,
@@ -421,6 +430,44 @@ export class Game {
     // pitch/roll from the slope make the hull conform to the wave it's on.
     const turnRoll = input.rudder * 0.25 * (this.body.speed > 5 ? 1 : 0);
     this.boat.rotation.set(-fwdSlope, h, rightSlope + turnRoll, "YXZ");
+  }
+
+  /**
+   * Trim the sails to the wind: ease the boom out toward the leeward side, far
+   * out when running, sheeted in near the centreline when close-hauled. Visual
+   * only, but it makes the wind direction readable straight off the boat.
+   */
+  private updateRig(time: number): void {
+    if (!this.mainsail) return;
+    const wind = this.physics.environment.sample(
+      this.body.x,
+      this.body.z,
+      time,
+    ).wind;
+    const ws = Math.hypot(wind.x, wind.y);
+    if (ws < 1e-4) return;
+    const wdx = wind.x / ws;
+    const wdz = wind.y / ws; // wind blowing-toward direction
+    const fx = Math.sin(this.body.heading);
+    const fz = Math.cos(this.body.heading);
+
+    // cosAwa: +1 pointing into the wind (boom centred), -1 running (boom out).
+    const cosAwa = -(fx * wdx + fz * wdz);
+    // Ease grows from 0 (luffing head-to-wind) to ~75° (running). The cubic
+    // keeps it firmly centred near the wind, so it can't read as the wrong side.
+    const t = (1 - cosAwa) * 0.5;
+    const ease = t * t * (3 - 2 * t) * 1.35;
+    // Leeward side = the side the wind blows toward (boat's starboard component).
+    const side = wdx * fz - wdz * fx >= 0 ? 1 : -1;
+
+    // Smooth toward the target so wave-driven heading wobble across head-to-wind
+    // can't snap the boom from side to side. Negative: the sail's +rotation.y
+    // swings the boom to windward, so the boom must ease the opposite way.
+    const target = -side * ease;
+    this.boomAngle += (target - this.boomAngle) * 0.1;
+
+    this.mainsail.rotation.y = -Math.PI / 2 + this.boomAngle;
+    if (this.jib) this.jib.rotation.y = Math.PI / 2 + this.boomAngle * 0.8;
   }
 
   /** Track which side of the start line the boat is on and detect crossings. */
@@ -615,15 +662,22 @@ export class Game {
     this.hud.setSpeed(this.body.speed, tuning.maxSpeed);
     this.hud.setPlayers(this.remotes.size + 1);
 
-    // Wind arrow points to the *local* wind (which shifts and gusts), relative
-    // to the boat heading.
+    // Wind dial: needle points where the local wind blows FROM, relative to the
+    // bow, and turns red when we're pointing inside the no-go zone.
     const wind = this.physics.environment.sample(
       this.body.x,
       this.body.z,
       time,
     ).wind;
-    const windAngle = Math.atan2(wind.x, wind.y) - this.body.heading;
-    this.hud.setWind(windAngle);
+    const ws = Math.hypot(wind.x, wind.y) || 1;
+    const fromAngle = Math.atan2(-wind.x, -wind.y) - this.body.heading;
+    const fx = Math.sin(this.body.heading);
+    const fz = Math.cos(this.body.heading);
+    const awa = Math.acos(
+      THREE.MathUtils.clamp(-(fx * wind.x + fz * wind.y) / ws, -1, 1),
+    );
+    this.hud.setWind(fromAngle, awa < tuning.noGoAngle);
+    this.hud.setBoom(this.boomAngle);
 
     this.hud.setRace(this.race, this.localId, now);
   }
