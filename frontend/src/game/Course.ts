@@ -2,60 +2,55 @@ import * as THREE from "three";
 import { Checkpoint, WORLD } from "../protocol";
 
 /**
- * Renders the race course as a series of gates (two buoys + a banner) and
- * detects when the local boat passes the gate it is currently aiming for.
- * Only used in speed mode.
+ * Renders the speed-mode race course: a start/finish line you cross plus one or
+ * more turning buoys you round. Detects when the local boat reaches the mark it
+ * is currently aiming for. Only used in speed mode.
  */
 export class Course {
   readonly group = new THREE.Group();
-  private gates: THREE.Group[] = [];
+  private marks: THREE.Group[] = [];
 
   get count(): number {
     return this.checkpoints.length;
   }
 
   constructor(private checkpoints: Checkpoint[]) {
-    checkpoints.forEach((cp, i) => {
-      const gate = this.buildGate(cp, i === 0);
-      gate.position.set(cp.x, 0, cp.z);
-      gate.rotation.y = cp.angle;
-      this.gates.push(gate);
-      this.group.add(gate);
+    checkpoints.forEach((cp) => {
+      const mark =
+        cp.kind === "line" ? this.buildStartLine() : this.buildBuoy();
+      mark.position.set(cp.x, 0, cp.z);
+      mark.rotation.y = cp.angle;
+      this.marks.push(mark);
+      this.group.add(mark);
     });
   }
 
-  private buildGate(_cp: Checkpoint, isStart: boolean): THREE.Group {
+  /** Start/finish: two posts + a banner you sail between. */
+  private buildStartLine(): THREE.Group {
     const gate = new THREE.Group();
-    const buoyColor = isStart ? 0xffffff : 0xff3b30;
     const half = WORLD.checkpointRadius;
-
-    const buoyGeo = new THREE.CylinderGeometry(2, 3, 8, 12);
-    const buoyMat = new THREE.MeshStandardMaterial({
-      color: buoyColor,
-      emissive: new THREE.Color(buoyColor).multiplyScalar(0.2),
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: new THREE.Color(0xffffff).multiplyScalar(0.2),
       roughness: 0.5,
     });
 
     for (const side of [-1, 1]) {
-      const buoy = new THREE.Mesh(buoyGeo, buoyMat);
+      const buoy = new THREE.Mesh(new THREE.CylinderGeometry(2, 3, 8, 12), mat);
       buoy.position.set(side * half, 2, 0);
       gate.add(buoy);
 
       const pole = new THREE.Mesh(
         new THREE.CylinderGeometry(0.4, 0.4, 14, 6),
-        buoyMat,
+        mat,
       );
       pole.position.set(side * half, 9, 0);
       gate.add(pole);
     }
 
-    // Banner across the top.
     const banner = new THREE.Mesh(
       new THREE.BoxGeometry(half * 2, 3, 0.5),
-      new THREE.MeshStandardMaterial({
-        color: isStart ? 0x222222 : buoyColor,
-        roughness: 0.7,
-      }),
+      new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.7 }),
     );
     banner.position.set(0, 15, 0);
     gate.add(banner);
@@ -63,24 +58,64 @@ export class Course {
     return gate;
   }
 
-  /** Highlight the gate the player is currently heading for. */
+  /** A single bright turning buoy meant to be rounded, not passed through. */
+  private buildBuoy(): THREE.Group {
+    const buoy = new THREE.Group();
+    const color = 0xff7a18; // hi-vis orange rounding mark
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      emissive: new THREE.Color(color).multiplyScalar(0.25),
+      roughness: 0.5,
+    });
+
+    // Tapered float body sitting at the waterline.
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(3, 4.5, 10, 16), mat);
+    body.position.y = 5;
+    buoy.add(body);
+
+    // Topmark so the buoy reads as a mark from a distance.
+    const top = new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 12), mat);
+    top.position.y = 12;
+    buoy.add(top);
+
+    // A white skirt ring at the waterline to suggest "round me".
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(5, 0.6, 8, 24),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 1.5;
+    buoy.add(ring);
+
+    return buoy;
+  }
+
+  /** Highlight the mark the player is currently heading for. */
   highlightNext(index: number): void {
-    this.gates.forEach((gate, i) => {
+    this.marks.forEach((mark, i) => {
       const active = i === index;
-      gate.scale.setScalar(active ? 1.06 : 1);
-      gate.traverse((o) => {
+      mark.scale.setScalar(active ? 1.12 : 1);
+      mark.traverse((o) => {
         const mesh = o as THREE.Mesh;
         const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
         if (mat && mat.emissive) {
-          mat.emissiveIntensity = active ? 1.5 : 1;
+          mat.emissiveIntensity = active ? 1.8 : 1;
         }
       });
     });
   }
 
+  /** Let the marks ride the swell so they bob with the boats. */
+  floatOnWaves(heightAt: (x: number, z: number) => number): void {
+    this.marks.forEach((mark, i) => {
+      const cp = this.checkpoints[i];
+      mark.position.y = heightAt(cp.x, cp.z);
+    });
+  }
+
   /**
-   * Returns true if (x, z) is within the capture radius of the given gate.
-   * Caller is responsible for only checking the gate it expects next.
+   * Returns true if (x, z) is within the capture radius of the given mark.
+   * Caller is responsible for only checking the mark it expects next.
    */
   isWithin(index: number, x: number, z: number): boolean {
     const cp = this.checkpoints[index];
@@ -93,5 +128,9 @@ export class Course {
   checkpointPosition(index: number): THREE.Vector3 {
     const cp = this.checkpoints[index];
     return new THREE.Vector3(cp?.x ?? 0, 0, cp?.z ?? 0);
+  }
+
+  markKind(index: number): "line" | "buoy" {
+    return this.checkpoints[index]?.kind ?? "buoy";
   }
 }

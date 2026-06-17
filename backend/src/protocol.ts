@@ -107,28 +107,22 @@ export const WORLD = {
 export interface Checkpoint {
   x: number;
   z: number;
-  /** Direction (radians) boats should travel through the gate. */
+  /** Direction (radians) boats should be travelling as they reach this mark. */
   angle: number;
+  /** "line" = a start/finish you cross; "buoy" = a turning mark you round. */
+  kind: "line" | "buoy";
 }
 
 /**
- * Deterministic oval course. Generated the same way on both client and server
- * so checkpoint indices line up. Checkpoint 0 is the start/finish line.
+ * A simple out-and-back course: start behind the line, sail out to the turning
+ * buoy, round it, and come back across the line to finish. Mark 0 is always the
+ * start/finish line; the rest are turning buoys. Defined identically on client
+ * and server so checkpoint indices line up.
  */
-function makeOvalCourse(count: number, rx: number, rz: number): Checkpoint[] {
-  const gates: Checkpoint[] = [];
-  for (let i = 0; i < count; i++) {
-    const a = (i / count) * Math.PI * 2;
-    const x = Math.cos(a) * rx;
-    const z = Math.sin(a) * rz;
-    // Tangent of the ellipse = direction of travel through the gate.
-    const angle = Math.atan2(Math.cos(a) * rz, -Math.sin(a) * rx);
-    gates.push({ x, z, angle });
-  }
-  return gates;
-}
-
-export const COURSE: Checkpoint[] = makeOvalCourse(8, 420, 300);
+export const COURSE: Checkpoint[] = [
+  { x: 0, z: -320, angle: 0, kind: "line" },
+  { x: 0, z: 380, angle: Math.PI, kind: "buoy" },
+];
 
 /** Hull colors handed out to players in join order. */
 export const PLAYER_COLORS = [

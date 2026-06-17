@@ -47,13 +47,18 @@ export class HUD {
       return;
     }
 
-    // Banner
+    // Banner. Two distinct countdowns: the lobby (waiting for a room to fill)
+    // and the actual race-start gun.
     if (race.phase === "waiting") {
       this.banner.className = "banner-soft";
-      this.banner.textContent = `Race starting in ${race.countdown}…`;
+      this.banner.innerHTML = `🔎 Finding racers…
+        <span class="banner-sub">race opens in ${race.countdown}s</span>`;
     } else if (race.phase === "countdown") {
       this.banner.className = "banner-count";
-      this.banner.textContent = race.countdown > 0 ? `${race.countdown}` : "GO!";
+      this.banner.innerHTML =
+        race.countdown > 0
+          ? `<span class="banner-sub">Race starts in</span>${race.countdown}`
+          : "GO!";
     } else if (race.phase === "racing") {
       this.banner.className = "banner-go";
       this.banner.textContent = "GO!";

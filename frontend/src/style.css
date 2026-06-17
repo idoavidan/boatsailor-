@@ -214,6 +214,13 @@ body {
 .banner-soft {
   font-size: 30px;
 }
+.banner-sub {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  opacity: 0.85;
+}
 .banner-count {
   font-size: 120px;
   animation: pop 1s ease;

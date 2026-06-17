@@ -48,6 +48,12 @@ export class Game {
   private remotes = new Map<string, RemoteBoat>();
 
   private course: Course | null = null;
+  private markBeacon: THREE.Group | null = null;
+  private beaconLabel: THREE.Sprite | null = null;
+  private beaconText = "";
+  private beaconDist = -1;
+  private offscreenArrow: THREE.Group | null = null;
+  private tmpProject = new THREE.Vector3();
   private expectedCheckpoint = 0;
   private race: RaceState = {
     phase: "free",
@@ -109,6 +115,17 @@ export class Game {
     if (this.mode === "speed") {
       this.course = new Course(welcome.course);
       this.scene.add(this.course.group);
+
+      // Guidance: a labelled beacon that floats over the next mark, plus a
+      // fallback arrow above the boat for when that mark is off-screen.
+      this.markBeacon = makeMarkBeacon();
+      this.beaconLabel = this.markBeacon.userData.label as THREE.Sprite;
+      this.markBeacon.visible = false;
+      this.scene.add(this.markBeacon);
+
+      this.offscreenArrow = makeDirectionArrow();
+      this.offscreenArrow.visible = false;
+      this.scene.add(this.offscreenArrow);
     }
 
     // --- Controls / HUD ---
@@ -187,8 +204,18 @@ export class Game {
   private applyRace(race: RaceState): void {
     this.race = race;
 
-    // On each fresh countdown, line up on the start grid and lock controls.
-    if (race.phase === "countdown" && this.prevPhase !== "countdown") {
+    // Line up on the start grid when the lobby opens, so players can manoeuvre
+    // through the whole pre-start and time their line crossing like a real boat
+    // race. We deliberately do NOT re-snap at the countdown if we came from the
+    // lobby, so an approach run isn't interrupted. (If we joined straight into a
+    // countdown with no lobby, line up then instead.)
+    const enteringLobby =
+      race.phase === "waiting" && this.prevPhase !== "waiting";
+    const coldCountdown =
+      race.phase === "countdown" &&
+      this.prevPhase !== "countdown" &&
+      this.prevPhase !== "waiting";
+    if (enteringLobby || coldCountdown) {
       this.placeOnStartGrid();
       this.expectedCheckpoint = 0;
     }
@@ -196,8 +223,9 @@ export class Game {
       this.expectedCheckpoint = 0;
     }
 
-    const locked = race.phase === "countdown" || race.phase === "waiting";
-    this.controls.setEnabled(!locked);
+    // Boats stay controllable throughout (including the pre-start) so players
+    // can jockey for position and hit the line as the start gun fires.
+    this.controls.setEnabled(true);
 
     this.prevPhase = race.phase;
   }
@@ -211,7 +239,9 @@ export class Game {
 
     const row = Math.floor(this.slot / 4);
     const col = this.slot % 4;
-    const back = 24 + row * 16;
+    // Keep every grid slot clear of the start line's capture radius so no one
+    // is credited the line the instant the race starts.
+    const back = 44 + row * 16;
     const side = (col - 1.5) * 14;
 
     this.body.x = gate.x - forward.x * back + lateral.x * side;
@@ -276,9 +306,13 @@ export class Game {
       );
     }
 
-    // 5. Camera, ocean, HUD
+    // 5. Camera, ocean, course markers, HUD
     this.updateCamera(dt);
     this.ocean.update(time, this.camera.position);
+    if (this.mode === "speed" && this.course) {
+      this.course.floatOnWaves((x, z) => this.ocean.sample(x, z, time));
+      this.updateMarkIndicators(time);
+    }
     this.updateHud(now);
 
     this.renderer.render(this.scene, this.camera);
@@ -352,6 +386,93 @@ export class Game {
     this.camera.lookAt(this.body.x, 6, this.body.z);
   }
 
+  /**
+   * Guide the player to the next mark: float a labelled beacon over it while it
+   * is on screen, and fall back to an arrow above the boat (pointing the way)
+   * when it is not.
+   */
+  private updateMarkIndicators(time: number): void {
+    if (!this.course || !this.markBeacon || !this.offscreenArrow) return;
+    const show =
+      this.race.phase === "racing" || this.race.phase === "countdown";
+    if (!show) {
+      this.markBeacon.visible = false;
+      this.offscreenArrow.visible = false;
+      return;
+    }
+
+    const target = this.course.checkpointPosition(this.expectedCheckpoint);
+    const markY = this.ocean.sample(target.x, target.z, time);
+
+    // Is the mark on screen this frame? Project a point just above it to NDC.
+    this.camera.updateMatrixWorld();
+    const ndc = this.tmpProject
+      .set(target.x, markY + 18, target.z)
+      .project(this.camera);
+    const onScreen =
+      ndc.z < 1 && Math.abs(ndc.x) <= 0.95 && Math.abs(ndc.y) <= 0.95;
+
+    this.markBeacon.visible = onScreen;
+    this.offscreenArrow.visible = !onScreen;
+
+    if (onScreen) {
+      this.markBeacon.position.set(
+        target.x,
+        markY + 24 + Math.sin(time * 3) * 0.6,
+        target.z,
+      );
+      // Counter-scale by distance so the label keeps a constant on-screen size,
+      // readable even from across the course.
+      const camDist = this.camera.position.distanceTo(this.markBeacon.position);
+      this.markBeacon.scale.setScalar(
+        THREE.MathUtils.clamp(camDist / 140, 0.5, 10),
+      );
+      // Instruction + live distance to the mark (rounded so the texture is only
+      // rebuilt when it visibly changes).
+      const meters =
+        Math.round(
+          Math.hypot(target.x - this.body.x, target.z - this.body.z) / 5,
+        ) * 5;
+      const text = this.markInstruction();
+      if (text !== this.beaconText || meters !== this.beaconDist) {
+        this.setBeaconLabel(text, meters);
+        this.beaconText = text;
+        this.beaconDist = meters;
+      }
+    } else {
+      const dx = target.x - this.body.x;
+      const dz = target.z - this.body.z;
+      this.offscreenArrow.rotation.y = Math.atan2(dx, dz);
+      this.offscreenArrow.position.set(
+        this.body.x,
+        this.boat.position.y + 16 + Math.sin(time * 3) * 0.6,
+        this.body.z,
+      );
+    }
+  }
+
+  /** Instruction shown on the next mark's beacon. */
+  private markInstruction(): string {
+    if (this.course?.markKind(this.expectedCheckpoint) === "buoy") {
+      return "GO AROUND";
+    }
+    // The start/finish line: you cross it, you don't round it. Word it for the
+    // start, a mid-race lap, or the final finish crossing.
+    const me = this.race.standings.find((s) => s.id === this.localId);
+    const lap = me?.lap ?? 0;
+    if (lap >= this.race.totalLaps) return "CROSS THE FINISH LINE";
+    if (lap === 0) return "CROSS THE START LINE";
+    return "CROSS THE LINE";
+  }
+
+  private setBeaconLabel(text: string, meters: number): void {
+    if (!this.beaconLabel) return;
+    const mat = this.beaconLabel.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.map = makeLabelTexture(text, meters);
+    mat.needsUpdate = true;
+  }
+
   private updateHud(now: number): void {
     const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
     this.hud.setSpeed(this.body.speed, tuning.maxSpeed);
@@ -404,6 +525,92 @@ export class Game {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** A downward arrow + instruction label that hovers over the active mark. */
+function makeMarkBeacon(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffd54a,
+    emissive: 0x6b4e00,
+    emissiveIntensity: 1,
+    roughness: 0.4,
+  });
+
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(2.6, 6, 4), mat);
+  arrow.rotation.x = Math.PI; // point straight down at the mark
+  group.add(arrow);
+
+  const label = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: makeLabelTexture("", 0),
+      transparent: true,
+      depthTest: false,
+    }),
+  );
+  label.position.y = 11;
+  label.scale.set(45, 14, 1);
+  group.add(label);
+
+  group.userData.label = label;
+  return group;
+}
+
+/** Render an instruction + distance to a canvas texture for a billboard sprite. */
+function makeLabelTexture(text: string, meters: number): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 200;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  roundRect(ctx, 8, 24, 624, 152, 20);
+  ctx.fill();
+
+  // Instruction line, shrunk until it fits the plate.
+  let size = 58;
+  ctx.font = `bold ${size}px system-ui, sans-serif`;
+  while (ctx.measureText(text).width > 580 && size > 24) {
+    size -= 2;
+    ctx.font = `bold ${size}px system-ui, sans-serif`;
+  }
+  ctx.fillStyle = "#ffe27a";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 320, 80);
+
+  // Distance line underneath.
+  ctx.font = "bold 40px system-ui, sans-serif";
+  ctx.fillStyle = "#cfe8ff";
+  ctx.fillText(`${meters} m`, 320, 140);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
+}
+
+/** A chunky arrow (shaft + head) pointing along +Z, used to flag the next mark. */
+function makeDirectionArrow(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffd54a,
+    emissive: 0x6b4e00,
+    emissiveIntensity: 1,
+    roughness: 0.4,
+  });
+
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.8, 4), mat);
+  group.add(shaft);
+
+  const head = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4, 4), mat);
+  head.rotation.x = Math.PI / 2; // cone defaults to +Y; aim it down +Z
+  head.position.z = 3.5;
+  group.add(head);
+
+  group.traverse((o) => {
+    o.castShadow = false;
+    o.receiveShadow = false;
+  });
+  return group;
+}
 
 function angleLerp(from: number, to: number, t: number): number {
   let diff = ((to - from + Math.PI) % (Math.PI * 2)) - Math.PI;
