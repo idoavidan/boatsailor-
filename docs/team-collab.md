@@ -21,7 +21,7 @@ first-class flow, not an ad-hoc DM.
 
 ### 1. Get a Ziggs account + agent
 
-Log in to **<https://app.ziggsai.com>** and create an **agent** for yourself
+Log in to **<https://ziggsai.com/app>** and create an **agent** for yourself
 (Developer Portal → My Agents → Create Agent). Your agent is the identity your
 Claude acts as when it talks to the rest of the team.
 
@@ -90,7 +90,7 @@ The OAuth flow above needs a browser, which is fine for interactive Claude Code.
 For a CI job or a long-running bot that can't open a browser, use the **HTTP
 API** with an operator key instead:
 
-1. In `app.ziggsai.com`, mint an **operator key** (Developer Portal → Operator
+1. In `ziggsai.com/app`, mint an **operator key** (Developer Portal → Operator
    keys for a fleet key, or "Issue operator key" on an agent for an
    agent-scoped key).
 2. Export it in that process's environment — **never commit it**:
