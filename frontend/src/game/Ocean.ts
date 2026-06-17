@@ -1,5 +1,40 @@
 import * as THREE from "three";
 
+interface WaveSpec {
+  dir: THREE.Vector2; // normalized travel direction in the XZ plane
+  freq: number;
+  amp: number;
+  speed: number;
+}
+
+/**
+ * The directional waves summed to form the surface. This single spec drives
+ * both the GLSL vertex shader (rendering) and {@link Ocean.sample} (so boats
+ * ride the exact same surface the player sees — no drift between the two).
+ */
+const WAVES: WaveSpec[] = [
+  { dir: new THREE.Vector2(1.0, 0.3).normalize(), freq: 0.012, amp: 1.6, speed: 1.1 },
+  { dir: new THREE.Vector2(-0.6, 1.0).normalize(), freq: 0.02, amp: 0.9, speed: 1.4 },
+  { dir: new THREE.Vector2(0.4, -0.9).normalize(), freq: 0.035, amp: 0.4, speed: 1.9 },
+  { dir: new THREE.Vector2(1.0, 1.0).normalize(), freq: 0.06, amp: 0.2, speed: 2.4 },
+];
+
+/** Format a JS number as a GLSL float literal (always has a decimal point). */
+function glslFloat(n: number): string {
+  const s = String(n);
+  return /[.e]/.test(s) ? s : s + ".0";
+}
+
+// Generate the shader's wave accumulation from WAVES so it can never drift
+// from the JS sampler below.
+const WAVE_SLOPES = WAVES.map((_, i) => `s${i}`).join(", ");
+const WAVE_SUM = WAVES.map((_, i) => `s${i}`).join(" + ");
+const WAVE_CALLS = WAVES.map(
+  (w, i) =>
+    `h += wave(p, vec2(${glslFloat(w.dir.x)}, ${glslFloat(w.dir.y)}), ` +
+    `${glslFloat(w.freq)}, ${glslFloat(w.amp)}, ${glslFloat(w.speed)}, s${i});`,
+).join("\n          ");
+
 /**
  * A large animated ocean plane. Self-contained GLSL (no texture assets):
  * height is a sum of directional sine waves, normals are derived analytically
@@ -42,15 +77,12 @@ export class Ocean {
           // the mesh is recentered under the camera each frame.
           vec4 world = modelMatrix * vec4(position, 1.0);
           vec2 p = world.xz;
-          vec2 s1, s2, s3, s4;
+          vec2 ${WAVE_SLOPES};
           float h = 0.0;
-          h += wave(p, normalize(vec2( 1.0,  0.3)), 0.012, 1.6, 1.1, s1);
-          h += wave(p, normalize(vec2(-0.6,  1.0)), 0.020, 0.9, 1.4, s2);
-          h += wave(p, normalize(vec2( 0.4, -0.9)), 0.035, 0.4, 1.9, s3);
-          h += wave(p, normalize(vec2( 1.0,  1.0)), 0.060, 0.2, 2.4, s4);
+          ${WAVE_CALLS}
           world.y += h;
 
-          vec2 slope = s1 + s2 + s3 + s4;
+          vec2 slope = ${WAVE_SUM};
           vNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
 
           vWorldPos = world.xyz;
@@ -106,5 +138,26 @@ export class Ocean {
     // Keep the ocean centered under the camera so it appears infinite.
     this.mesh.position.x = cameraPos.x;
     this.mesh.position.z = cameraPos.z;
+  }
+
+  /**
+   * World-space surface height at (x, z) for the given time — the exact value
+   * the vertex shader renders, so floating objects sit on the visible water.
+   * If `outSlope` is provided it's filled with the surface gradient
+   * (∂h/∂x, ∂h/∂z), useful for tilting an object to follow the wave.
+   */
+  sample(x: number, z: number, time: number, outSlope?: THREE.Vector2): number {
+    let h = 0;
+    if (outSlope) outSlope.set(0, 0);
+    for (const w of WAVES) {
+      const phase = (w.dir.x * x + w.dir.y * z) * w.freq + time * w.speed;
+      h += w.amp * Math.sin(phase);
+      if (outSlope) {
+        const c = w.amp * w.freq * Math.cos(phase);
+        outSlope.x += c * w.dir.x;
+        outSlope.y += c * w.dir.y;
+      }
+    }
+    return h;
   }
 }

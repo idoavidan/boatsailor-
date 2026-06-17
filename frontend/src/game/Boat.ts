@@ -55,7 +55,9 @@ export function createBoatMesh(color: number): THREE.Group {
   sailShape.lineTo(-5, 0);
   sailShape.lineTo(0, 0);
   const sail = new THREE.Mesh(new THREE.ShapeGeometry(sailShape), sailMat);
-  sail.rotation.y = Math.PI / 2;
+  // -PI/2 so the boom trails aft (toward -Z, the stern); +PI/2 would push the
+  // sail out over the bow.
+  sail.rotation.y = -Math.PI / 2;
   sail.position.set(0, 1.8, 0.5);
   group.add(sail);
 
@@ -174,8 +176,10 @@ export class BoatBody {
     this.speed = THREE.MathUtils.clamp(this.speed, 0, t.maxSpeed);
 
     // Turn rate scales with speed so a dead-stopped boat barely turns.
+    // Subtract: the chase camera looks toward +Z, so steering right (rudder > 0)
+    // must decrease heading to curve the boat toward the player's right.
     const speedRatio = THREE.MathUtils.clamp(this.speed / t.maxSpeed, 0.1, 1);
-    this.heading += input.rudder * t.turnRate * speedRatio * dt;
+    this.heading -= input.rudder * t.turnRate * speedRatio * dt;
 
     this.x += Math.sin(this.heading) * this.speed * dt;
     this.z += Math.cos(this.heading) * this.speed * dt;

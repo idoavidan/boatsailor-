@@ -60,6 +60,7 @@ export class Game {
 
   private hud = new HUD();
   private sendAccumulator = 0;
+  private waveSlope = new THREE.Vector2();
 
   constructor(
     private net: Network,
@@ -267,7 +268,12 @@ export class Game {
       r.group.position.z += (r.target.z - r.group.position.z) * k;
       r.renderHeading = angleLerp(r.renderHeading, r.target.heading, k);
       r.group.rotation.y = r.renderHeading;
-      r.group.position.y = Math.sin(time * 1.5 + r.group.position.x) * 0.6;
+      // Ride the same wave surface as the local boat.
+      r.group.position.y = this.ocean.sample(
+        r.group.position.x,
+        r.group.position.z,
+        time,
+      );
     }
 
     // 5. Camera, ocean, HUD
@@ -282,15 +288,23 @@ export class Game {
     input: { rudder: number },
     time: number,
   ): void {
-    this.boat.position.set(
+    // Sit on the actual water surface (not a fixed fake bob) and tilt to follow
+    // the wave slope, so the boat always rides the crest it's over.
+    const height = this.ocean.sample(
       this.body.x,
-      Math.sin(time * 1.6) * 0.5,
       this.body.z,
+      time,
+      this.waveSlope,
     );
-    this.boat.rotation.y = this.body.heading;
-    // Roll into turns, pitch slightly with the waves.
-    this.boat.rotation.z = -input.rudder * 0.25 * (this.body.speed > 5 ? 1 : 0);
-    this.boat.rotation.x = Math.sin(time * 1.2) * 0.03;
+    this.boat.position.set(this.body.x, height, this.body.z);
+
+    const h = this.body.heading;
+    const fwdSlope = this.waveSlope.x * Math.sin(h) + this.waveSlope.y * Math.cos(h);
+    const rightSlope = this.waveSlope.x * Math.cos(h) - this.waveSlope.y * Math.sin(h);
+    // Roll banks into the turn (same sign as the corrected rudder->heading);
+    // pitch/roll from the slope make the hull conform to the wave it's on.
+    const turnRoll = input.rudder * 0.25 * (this.body.speed > 5 ? 1 : 0);
+    this.boat.rotation.set(-fwdSlope, h, rightSlope + turnRoll, "YXZ");
   }
 
   private checkCheckpoints(): void {
