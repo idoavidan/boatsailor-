@@ -8,6 +8,7 @@ import {
   WORLD,
 } from "../protocol";
 import { HUD } from "../ui/HUD";
+import { Minimap, MinimapBoat } from "../ui/Minimap";
 import { createBoatMesh } from "./Boat";
 import { Controls } from "./Controls";
 import { Course } from "./Course";
@@ -43,6 +44,7 @@ interface RemoteBoat {
   group: THREE.Group;
   target: { x: number; z: number; heading: number; speed: number };
   renderHeading: number;
+  color: number;
 }
 
 export class Game {
@@ -56,6 +58,7 @@ export class Game {
 
   private localId = "";
   private slot = 0;
+  private localColor = 0xffffff;
   private mode: GameMode;
   private physics!: PhysicsWorld;
   private body!: BoatState; // alias of physics.boat (the dynamic state)
@@ -94,6 +97,7 @@ export class Game {
   private prevPhase = "free";
 
   private hud = new HUD();
+  private minimap = new Minimap();
   private sendAccumulator = 0;
   private waveSlope = new THREE.Vector2();
 
@@ -105,6 +109,7 @@ export class Game {
     this.mode = welcome.mode;
     this.localId = welcome.id;
     this.slot = welcome.slot;
+    this.localColor = welcome.color;
 
     // --- Renderer / camera ---
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -238,6 +243,7 @@ export class Game {
       group,
       target: { x: p.x, z: p.z, heading: p.heading, speed: p.speed },
       renderHeading: p.heading,
+      color: p.color,
     });
   }
 
@@ -403,6 +409,7 @@ export class Game {
       this.course.setLineRole(this.lineRole());
       this.course.highlightNext(this.expectedCheckpoint);
       this.updateMarkIndicators(time);
+      this.updateMinimap(time);
     }
     this.updateHud(now, time);
 
@@ -655,6 +662,75 @@ export class Game {
     mat.map?.dispose();
     mat.map = makeLabelTexture(text, meters);
     mat.needsUpdate = true;
+  }
+
+  /**
+   * Drive the leg-up tactical radar: orient it along the current leg (next mark
+   * up, last mark down), plot every boat, and — when the next mark is to
+   * windward — overlay the no-go laylines that show where to tack.
+   */
+  private updateMinimap(time: number): void {
+    if (!this.course) return;
+    const phase = this.race.phase;
+    if (phase === "free" || phase === "finished") {
+      this.minimap.hide();
+      return;
+    }
+
+    const count = this.course.count;
+    const next = this.course.checkpoint(this.expectedCheckpoint);
+    const prev = this.course.checkpoint(
+      (this.expectedCheckpoint - 1 + count) % count,
+    );
+    if (!next || !prev) {
+      this.minimap.hide();
+      return;
+    }
+
+    const wind = this.physics.environment.sample(
+      this.body.x,
+      this.body.z,
+      time,
+    ).wind;
+    const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
+
+    // Is this a beat (the next mark sits close to dead upwind)? Only then do the
+    // laylines mean "sail to here, then tack".
+    let lx = next.x - prev.x;
+    let lz = next.z - prev.z;
+    const ll = Math.hypot(lx, lz) || 1;
+    lx /= ll;
+    lz /= ll;
+    const wl = Math.hypot(wind.x, wind.y) || 1;
+    // legToMark · upwind, where upwind = -wind / |wind|.
+    const towardUpwind = -(lx * wind.x + lz * wind.y) / wl;
+    const isBeat = towardUpwind > Math.cos(tuning.noGoAngle + 0.4);
+
+    const others: MinimapBoat[] = [];
+    for (const r of this.remotes.values()) {
+      others.push({
+        x: r.group.position.x,
+        z: r.group.position.z,
+        heading: r.renderHeading,
+        color: r.color,
+      });
+    }
+
+    this.minimap.show();
+    this.minimap.update({
+      boat: {
+        x: this.body.x,
+        z: this.body.z,
+        heading: this.body.heading,
+        color: this.localColor,
+      },
+      others,
+      next: { x: next.x, z: next.z, kind: next.kind, angle: next.angle },
+      prev: { x: prev.x, z: prev.z, kind: prev.kind, angle: prev.angle },
+      wind: { x: wind.x, z: wind.y },
+      noGoAngle: tuning.noGoAngle,
+      isBeat,
+    });
   }
 
   private updateHud(now: number, time: number): void {
