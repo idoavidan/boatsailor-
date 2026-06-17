@@ -105,6 +105,18 @@ export class Course {
     });
   }
 
+  /** Dim the marks while the line is dormant (lobby); full bright once armed. */
+  setActive(active: boolean): void {
+    this.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
+      if (mat && "opacity" in mat) {
+        mat.transparent = !active;
+        mat.opacity = active ? 1 : 0.22;
+      }
+    });
+  }
+
   /** Let the marks ride the swell so they bob with the boats. */
   floatOnWaves(heightAt: (x: number, z: number) => number): void {
     this.marks.forEach((mark, i) => {
@@ -132,5 +144,9 @@ export class Course {
 
   markKind(index: number): "line" | "buoy" {
     return this.checkpoints[index]?.kind ?? "buoy";
+  }
+
+  checkpoint(index: number): Checkpoint | undefined {
+    return this.checkpoints[index];
   }
 }

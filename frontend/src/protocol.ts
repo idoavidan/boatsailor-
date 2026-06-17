@@ -92,10 +92,10 @@ export const WORLD = {
   /** Distance at which a boat is considered to have passed a checkpoint gate. */
   checkpointRadius: 28,
   totalLaps: 2,
-  /** Seconds of "get ready" lobby once a speed room has a player. */
-  lobbySeconds: 6,
-  /** Seconds of 3-2-1 countdown before GO. */
-  countdownSeconds: 3,
+  /** Seconds of "finding racers" lobby once a speed room has a player. */
+  lobbySeconds: 8,
+  /** Seconds of pre-start manoeuvring before GO (final 5 are a 5-4-3-2-1). */
+  countdownSeconds: 12,
   /** Seconds the standings screen stays up before the room resets. */
   finishSeconds: 8,
 } as const;

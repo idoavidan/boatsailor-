@@ -54,11 +54,18 @@ export class HUD {
       this.banner.innerHTML = `🔎 Finding racers…
         <span class="banner-sub">race opens in ${race.countdown}s</span>`;
     } else if (race.phase === "countdown") {
-      this.banner.className = "banner-count";
-      this.banner.innerHTML =
-        race.countdown > 0
-          ? `<span class="banner-sub">Race starts in</span>${race.countdown}`
-          : "GO!";
+      if (race.countdown > 5) {
+        // Early pre-start: keep the screen clear so players can manoeuvre.
+        this.banner.className = "banner-soft";
+        this.banner.innerHTML = `🚩 Pre-start
+          <span class="banner-sub">to the line — gun in ${race.countdown}s</span>`;
+      } else {
+        this.banner.className = "banner-count";
+        this.banner.innerHTML =
+          race.countdown > 0
+            ? `<span class="banner-sub">Race starts in</span>${race.countdown}`
+            : "GO!";
+      }
     } else if (race.phase === "racing") {
       this.banner.className = "banner-go";
       this.banner.textContent = "GO!";

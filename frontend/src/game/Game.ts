@@ -23,6 +23,8 @@ const SUN_DIR = new THREE.Vector3(0.4, 0.85, 0.25).normalize();
 /** Fixed wind for the whole arena. TODO: have the server broadcast wind. */
 const WIND_DIR = new THREE.Vector2(0.7, 0.7).normalize();
 const SEND_RATE = WORLD.tickRate; // outgoing state messages per second
+/** Lateral reach of the start/finish line — matches the visible gate posts. */
+const START_LINE_HALF = WORLD.checkpointRadius;
 
 interface RemoteBoat {
   group: THREE.Group;
@@ -53,8 +55,17 @@ export class Game {
   private beaconText = "";
   private beaconDist = -1;
   private offscreenArrow: THREE.Group | null = null;
+  private lobbyLabel: THREE.Sprite | null = null;
   private tmpProject = new THREE.Vector3();
   private expectedCheckpoint = 0;
+
+  // Start-line crossing state (speed mode). `hasStarted` flips once the boat
+  // makes a clean forward crossing after the gun; an over-early boat must dip
+  // back and re-cross to set it.
+  private hasStarted = false;
+  private prevStartD = -1; // signed distance past the line last frame
+  private startAhead = false; // currently on the course side of the line
+  private startCrossed = 0; // this frame: +1 forward, -1 backward, 0 none
   private race: RaceState = {
     phase: "free",
     totalLaps: WORLD.totalLaps,
@@ -126,6 +137,11 @@ export class Game {
       this.offscreenArrow = makeDirectionArrow();
       this.offscreenArrow.visible = false;
       this.scene.add(this.offscreenArrow);
+
+      // A "waiting" sign shown over the boat while the room lobby fills.
+      this.lobbyLabel = makeLobbyLabel();
+      this.lobbyLabel.visible = false;
+      this.scene.add(this.lobbyLabel);
     }
 
     // --- Controls / HUD ---
@@ -203,31 +219,47 @@ export class Game {
 
   private applyRace(race: RaceState): void {
     this.race = race;
+    const phase = race.phase;
 
-    // Line up on the start grid when the lobby opens, so players can manoeuvre
-    // through the whole pre-start and time their line crossing like a real boat
-    // race. We deliberately do NOT re-snap at the countdown if we came from the
-    // lobby, so an approach run isn't interrupted. (If we joined straight into a
-    // countdown with no lobby, line up then instead.)
-    const enteringLobby =
-      race.phase === "waiting" && this.prevPhase !== "waiting";
-    const coldCountdown =
-      race.phase === "countdown" &&
-      this.prevPhase !== "countdown" &&
-      this.prevPhase !== "waiting";
-    if (enteringLobby || coldCountdown) {
+    if (phase === "waiting" && this.prevPhase !== "waiting") {
+      // Room lobby: roam freely while the room fills. The start line is dormant
+      // (dimmed) and isn't crossed yet.
+      this.course?.setActive(false);
+      this.resetStartLineState();
+    }
+    if (phase === "countdown" && this.prevPhase !== "countdown") {
+      // The real pre-start: line everyone up on the grid and arm the line so
+      // players can time their crossing with the gun.
       this.placeOnStartGrid();
       this.expectedCheckpoint = 0;
+      this.course?.setActive(true);
+      this.resetStartLineState();
     }
-    if (race.phase === "racing" && this.prevPhase !== "racing") {
+    if (phase === "racing" && this.prevPhase !== "racing") {
       this.expectedCheckpoint = 0;
+      this.hasStarted = false;
     }
 
-    // Boats stay controllable throughout (including the pre-start) so players
-    // can jockey for position and hit the line as the start gun fires.
+    // Boats stay controllable throughout (lobby and pre-start included).
     this.controls.setEnabled(true);
 
-    this.prevPhase = race.phase;
+    this.prevPhase = phase;
+  }
+
+  /** Re-seed the start-line crossing tracker from the boat's current side. */
+  private resetStartLineState(): void {
+    this.hasStarted = false;
+    this.startCrossed = 0;
+    const cp = this.course?.checkpoint(0);
+    if (!cp) {
+      this.prevStartD = -1;
+      this.startAhead = false;
+      return;
+    }
+    const dx = this.body.x - cp.x;
+    const dz = this.body.z - cp.z;
+    this.prevStartD = dx * Math.sin(cp.angle) + dz * Math.cos(cp.angle);
+    this.startAhead = this.prevStartD >= 0;
   }
 
   private placeOnStartGrid(): void {
@@ -273,9 +305,13 @@ export class Game {
     this.body.update(input, dt, WORLD.bounds);
     this.applyLocalBoatTransform(input, time);
 
-    // 2. Checkpoints (speed mode)
-    if (this.mode === "speed" && this.race.phase === "racing") {
-      this.checkCheckpoints();
+    // 2. Start line + checkpoints (speed mode)
+    if (this.mode === "speed" && this.course) {
+      const phase = this.race.phase;
+      if (phase === "countdown" || phase === "racing") {
+        this.updateStartLineState();
+      }
+      if (phase === "racing") this.checkCheckpoints();
     }
 
     // 3. Send state to server at a fixed rate
@@ -341,14 +377,46 @@ export class Game {
     this.boat.rotation.set(-fwdSlope, h, rightSlope + turnRoll, "YXZ");
   }
 
+  /** Track which side of the start line the boat is on and detect crossings. */
+  private updateStartLineState(): void {
+    const cp = this.course?.checkpoint(0);
+    if (!cp) return;
+    const dx = this.body.x - cp.x;
+    const dz = this.body.z - cp.z;
+    const sin = Math.sin(cp.angle);
+    const cos = Math.cos(cp.angle);
+    const d = dx * sin + dz * cos; // signed distance past the line (+ = course side)
+    const lateral = dx * cos - dz * sin; // position along the line
+    this.startCrossed = 0;
+    if (Math.abs(lateral) <= START_LINE_HALF) {
+      if (this.prevStartD < 0 && d >= 0) this.startCrossed = 1; // forward
+      else if (this.prevStartD >= 0 && d < 0) this.startCrossed = -1; // backward
+    }
+    this.startAhead = d >= 0;
+    this.prevStartD = d;
+  }
+
   private checkCheckpoints(): void {
     if (!this.course) return;
-    if (
-      this.course.isWithin(this.expectedCheckpoint, this.body.x, this.body.z)
-    ) {
-      this.net.send({ type: "checkpoint", index: this.expectedCheckpoint });
-      this.expectedCheckpoint =
-        (this.expectedCheckpoint + 1) % this.course.count;
+    const idx = this.expectedCheckpoint;
+
+    let passed: boolean;
+    if (this.course.markKind(idx) === "buoy") {
+      // Round the buoy: get within its radius.
+      passed = this.course.isWithin(idx, this.body.x, this.body.z);
+    } else if (!this.hasStarted) {
+      // Starting requires a clean forward crossing, so a boat that's over the
+      // line early must dip back and re-cross to get going.
+      passed = this.startCrossed === 1;
+      if (passed) this.hasStarted = true;
+    } else {
+      // Lap / finish: crossing the line in either direction counts.
+      passed = this.startCrossed !== 0;
+    }
+
+    if (passed) {
+      this.net.send({ type: "checkpoint", index: idx });
+      this.expectedCheckpoint = (idx + 1) % this.course.count;
     }
     this.course.highlightNext(this.expectedCheckpoint);
   }
@@ -393,8 +461,22 @@ export class Game {
    */
   private updateMarkIndicators(time: number): void {
     if (!this.course || !this.markBeacon || !this.offscreenArrow) return;
-    const show =
-      this.race.phase === "racing" || this.race.phase === "countdown";
+    const phase = this.race.phase;
+
+    // Lobby: hover a "waiting" sign over the boat; no start-line guidance yet.
+    if (this.lobbyLabel) {
+      const inLobby = phase === "waiting";
+      this.lobbyLabel.visible = inLobby;
+      if (inLobby) {
+        this.lobbyLabel.position.set(
+          this.body.x,
+          this.boat.position.y + 20 + Math.sin(time * 2) * 0.5,
+          this.body.z,
+        );
+      }
+    }
+
+    const show = phase === "racing" || phase === "countdown";
     if (!show) {
       this.markBeacon.visible = false;
       this.offscreenArrow.visible = false;
@@ -456,13 +538,16 @@ export class Game {
     if (this.course?.markKind(this.expectedCheckpoint) === "buoy") {
       return "GO AROUND";
     }
-    // The start/finish line: you cross it, you don't round it. Word it for the
-    // start, a mid-race lap, or the final finish crossing.
+    // The start/finish line: you cross it, you don't round it.
+    if (this.race.phase === "countdown") {
+      return this.startAhead ? "GET BEHIND THE LINE" : "CROSS AT THE GUN";
+    }
+    if (!this.hasStarted) {
+      return this.startAhead ? "OVER EARLY — GO BACK" : "CROSS THE START LINE";
+    }
     const me = this.race.standings.find((s) => s.id === this.localId);
     const lap = me?.lap ?? 0;
-    if (lap >= this.race.totalLaps) return "CROSS THE FINISH LINE";
-    if (lap === 0) return "CROSS THE START LINE";
-    return "CROSS THE LINE";
+    return lap >= this.race.totalLaps ? "CROSS THE FINISH LINE" : "CROSS THE LINE";
   }
 
   private setBeaconLabel(text: string, meters: number): void {
@@ -555,8 +640,15 @@ function makeMarkBeacon(): THREE.Group {
   return group;
 }
 
-/** Render an instruction + distance to a canvas texture for a billboard sprite. */
-function makeLabelTexture(text: string, meters: number): THREE.CanvasTexture {
+/**
+ * Render an instruction (and optional distance) to a canvas texture for a
+ * billboard sprite. Pass `meters < 0` for a single centered line.
+ */
+function makeLabelTexture(
+  text: string,
+  meters: number,
+  accent = "#ffe27a",
+): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 640;
   canvas.height = 200;
@@ -572,19 +664,34 @@ function makeLabelTexture(text: string, meters: number): THREE.CanvasTexture {
     size -= 2;
     ctx.font = `bold ${size}px system-ui, sans-serif`;
   }
-  ctx.fillStyle = "#ffe27a";
+  ctx.fillStyle = accent;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 320, 80);
+  ctx.fillText(text, 320, meters >= 0 ? 80 : 100);
 
-  // Distance line underneath.
-  ctx.font = "bold 40px system-ui, sans-serif";
-  ctx.fillStyle = "#cfe8ff";
-  ctx.fillText(`${meters} m`, 320, 140);
+  // Distance line underneath (omitted when meters < 0).
+  if (meters >= 0) {
+    ctx.font = "bold 40px system-ui, sans-serif";
+    ctx.fillStyle = "#cfe8ff";
+    ctx.fillText(`${meters} m`, 320, 140);
+  }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearFilter;
   return tex;
+}
+
+/** A billboard sign hovering over the boat while the room lobby fills. */
+function makeLobbyLabel(): THREE.Sprite {
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: makeLabelTexture("WAITING FOR THE GUN", -1, "#bfe3ff"),
+      transparent: true,
+      depthTest: false,
+    }),
+  );
+  sprite.scale.set(52, 16, 1);
+  return sprite;
 }
 
 /** A chunky arrow (shaft + head) pointing along +Z, used to flag the next mark. */
