@@ -12,12 +12,20 @@ interface WaveSpec {
  * both the GLSL vertex shader (rendering) and {@link Ocean.sample} (so boats
  * ride the exact same surface the player sees — no drift between the two).
  */
+// A few waves clustered in a NARROW angular cone around one dominant direction.
+// They share a clear travel direction (so the swell reads as directional lines),
+// but their slightly different angles + wavelengths interfere so each crest runs
+// long and then ends — finite wavefronts, not infinite parallel lines. Widen the
+// angular spread for shorter crests; tighten it for longer ones.
 const WAVES: WaveSpec[] = [
-  { dir: new THREE.Vector2(1.0, 0.3).normalize(), freq: 0.012, amp: 1.6, speed: 1.1 },
-  { dir: new THREE.Vector2(-0.6, 1.0).normalize(), freq: 0.02, amp: 0.9, speed: 1.4 },
-  { dir: new THREE.Vector2(0.4, -0.9).normalize(), freq: 0.035, amp: 0.4, speed: 1.9 },
-  { dir: new THREE.Vector2(1.0, 1.0).normalize(), freq: 0.06, amp: 0.2, speed: 2.4 },
+  { dir: new THREE.Vector2(1.0, 0.28).normalize(), freq: 0.042, amp: 2.5, speed: 1.5 },
+  { dir: new THREE.Vector2(1.0, 0.12).normalize(), freq: 0.061, amp: 1.4, speed: 1.8 },
+  { dir: new THREE.Vector2(1.0, 0.46).normalize(), freq: 0.083, amp: 0.9, speed: 2.0 },
+  { dir: new THREE.Vector2(1.0, 0.33).normalize(), freq: 0.1, amp: 0.4, speed: 2.5 },
 ];
+
+/** Peak possible crest height (all waves in phase) — used to place foam. */
+const WAVE_MAX = WAVES.reduce((sum, w) => sum + w.amp, 0);
 
 /** Format a JS number as a GLSL float literal (always has a decimal point). */
 function glslFloat(n: number): string {
@@ -46,7 +54,8 @@ export class Ocean {
   private material: THREE.ShaderMaterial;
 
   constructor(size: number, skyColor: THREE.Color, sunDir: THREE.Vector3) {
-    const geometry = new THREE.PlaneGeometry(size, size, 180, 180);
+    // High tessellation so the short, steep swells stay smooth, not faceted.
+    const geometry = new THREE.PlaneGeometry(size, size, 512, 512);
     geometry.rotateX(-Math.PI / 2); // lie flat in the XZ plane
 
     this.material = new THREE.ShaderMaterial({
@@ -54,9 +63,12 @@ export class Ocean {
         uTime: { value: 0 },
         uCameraPos: { value: new THREE.Vector3() },
         uSunDir: { value: sunDir.clone().normalize() },
-        uDeep: { value: new THREE.Color(0x0a3d62) },
-        uShallow: { value: new THREE.Color(0x2e86de) },
+        // Pastel-teal arcade palette: clean turquoise gradient, soft foam.
+        uDeep: { value: new THREE.Color(0x2785a0) },
+        uShallow: { value: new THREE.Color(0x8fe3e6) },
         uSky: { value: skyColor.clone() },
+        uFoam: { value: new THREE.Color(0xf2ffff) },
+        uWaveMax: { value: WAVE_MAX },
         uFogNear: { value: size * 0.12 },
         uFogFar: { value: size * 0.5 },
       },
@@ -64,6 +76,7 @@ export class Ocean {
         uniform float uTime;
         varying vec3 vWorldPos;
         varying vec3 vNormal;
+        varying float vWaveHeight;
 
         // One directional wave + its contribution to the surface slope.
         float wave(vec2 p, vec2 dir, float freq, float amp, float speed, out vec2 slope) {
@@ -83,40 +96,61 @@ export class Ocean {
           world.y += h;
 
           vec2 slope = ${WAVE_SUM};
-          vNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
+          // Exaggerate the slope for the lighting normal ONLY (geometry + the JS
+          // sampler keep the true height, so boats still sit right) so the wave
+          // faces read as steep, sharply-lit lines.
+          vNormal = normalize(vec3(-slope.x * 1.6, 1.0, -slope.y * 1.6));
 
+          vWaveHeight = h;
           vWorldPos = world.xyz;
           gl_Position = projectionMatrix * viewMatrix * world;
         }
       `,
       fragmentShader: /* glsl */ `
+        uniform float uTime;
         uniform vec3 uCameraPos;
         uniform vec3 uSunDir;
         uniform vec3 uDeep;
         uniform vec3 uShallow;
         uniform vec3 uSky;
+        uniform vec3 uFoam;
+        uniform float uWaveMax;
         uniform float uFogNear;
         uniform float uFogFar;
         varying vec3 vWorldPos;
         varying vec3 vNormal;
+        varying float vWaveHeight;
 
         void main() {
+          vec2 q = vWorldPos.xz;
           vec3 normal = normalize(vNormal);
           vec3 viewDir = normalize(uCameraPos - vWorldPos);
 
-          // Base water color, lighter on wave crests.
-          float facing = clamp(dot(normal, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
-          vec3 water = mix(uDeep, uShallow, pow(facing, 4.0));
+          // Smooth height gradient: deep troughs, bright crests. The directional
+          // swell makes this read as travelling wavefront lines.
+          float hNorm = smoothstep(
+            0.12, 0.95, clamp(vWaveHeight / uWaveMax * 0.5 + 0.5, 0.0, 1.0));
+          vec3 water = mix(uDeep, uShallow, hNorm);
 
-          // Diffuse + sun specular glint.
-          float diff = clamp(dot(normal, uSunDir) * 0.5 + 0.6, 0.0, 1.0);
+          // Gentle directional shading — wave faces catch the light but never go
+          // black (lots of ambient), so it stays clean and arcade.
+          float diff = dot(normal, uSunDir) * 0.32 + 0.72;
+          vec3 color = water * diff;
+
+          // Sky reflection at grazing angles for a shiny water sheen.
+          float fres = pow(1.0 - max(dot(viewDir, normal), 0.0), 4.0);
+          color = mix(color, uSky * 1.08, fres * 0.45);
+
+          // Tight sun sparkle — small glints rather than broad white smears.
           vec3 halfDir = normalize(uSunDir + viewDir);
-          float spec = pow(max(dot(normal, halfDir), 0.0), 120.0);
+          float spec = pow(max(dot(normal, halfDir), 0.0), 200.0);
+          color += spec * 0.5 * vec3(1.0, 0.98, 0.9);
 
-          // Fresnel: reflect the sky at grazing angles.
-          float fres = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0);
-          vec3 color = mix(water * diff, uSky, fres * 0.6);
-          color += spec * vec3(1.0, 0.97, 0.85);
+          // Rare, crisp whitecaps only on the very tops of the tallest crests.
+          float crestH = vWaveHeight +
+            (sin(q.x * 0.25 + uTime * 2.0) + sin(q.y * 0.22 - uTime * 1.7)) * 0.18;
+          float foam = smoothstep(uWaveMax * 0.82, uWaveMax * 0.96, crestH);
+          color = mix(color, uFoam, foam * 0.85);
 
           // Distance haze toward the horizon.
           float dist = length(uCameraPos - vWorldPos);

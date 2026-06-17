@@ -8,23 +8,36 @@ import {
   WORLD,
 } from "../protocol";
 import { HUD } from "../ui/HUD";
-import {
-  BoatBody,
-  CASUAL_TUNING,
-  SPEED_TUNING,
-  createBoatMesh,
-} from "./Boat";
+import { createBoatMesh } from "./Boat";
 import { Controls } from "./Controls";
 import { Course } from "./Course";
 import { Ocean } from "./Ocean";
+import { Wake } from "./Wake";
+import {
+  BoatState,
+  CASUAL_TUNING,
+  CollisionWorld,
+  CurrentField,
+  Environment,
+  PhysicsWorld,
+  SPEED_TUNING,
+  WaveField,
+  WindField,
+} from "./physics";
 
 const SKY_COLOR = new THREE.Color(0x9fd5ee);
 const SUN_DIR = new THREE.Vector3(0.4, 0.85, 0.25).normalize();
-/** Fixed wind for the whole arena. TODO: have the server broadcast wind. */
+/** Base wind direction for the whole arena; the WindField adds shifts + gusts.
+ *  TODO: have the server broadcast the base wind. */
 const WIND_DIR = new THREE.Vector2(0.7, 0.7).normalize();
 const SEND_RATE = WORLD.tickRate; // outgoing state messages per second
 /** Lateral reach of the start/finish line — matches the visible gate posts. */
 const START_LINE_HALF = WORLD.checkpointRadius;
+/** Collision radius of a hull / buoy, in world units. */
+const BOAT_RADIUS = 6;
+/** Beyond this camera distance the mark beacon stops shrinking (stays legible);
+ *  closer than this it scales naturally with the mark it sits on. */
+const BEACON_FLOOR_DIST = 200;
 
 interface RemoteBoat {
   group: THREE.Group;
@@ -44,8 +57,10 @@ export class Game {
   private localId = "";
   private slot = 0;
   private mode: GameMode;
-  private body: BoatBody;
+  private physics!: PhysicsWorld;
+  private body!: BoatState; // alias of physics.boat (the dynamic state)
   private boat: THREE.Group;
+  private wake!: Wake;
 
   private remotes = new Map<string, RemoteBoat>();
 
@@ -114,18 +129,39 @@ export class Game {
     this.ocean = new Ocean(WORLD.bounds * 6, SKY_COLOR, SUN_DIR);
     this.scene.add(this.ocean.mesh);
 
-    // --- Local boat ---
-    this.body = new BoatBody(
-      this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING,
-      WIND_DIR.clone(),
+    // --- Local boat physics ---
+    const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
+    const environment = new Environment(
+      new WindField(WIND_DIR.clone(), 1),
+      new CurrentField(), // off by default
+      new WaveField((x, z, t, slope) => this.ocean.sample(x, z, t, slope)),
     );
+    const collision = new CollisionWorld(WORLD.bounds, BOAT_RADIUS);
+    this.physics = new PhysicsWorld(tuning, environment, collision);
+    this.body = this.physics.boat;
+
     this.boat = createBoatMesh(welcome.color);
     this.scene.add(this.boat);
+
+    this.wake = new Wake();
+    this.scene.add(this.wake.mesh);
 
     // --- Course (speed mode only) ---
     if (this.mode === "speed") {
       this.course = new Course(welcome.course);
       this.scene.add(this.course.group);
+
+      // Turning buoys are solid — register them as collision obstacles (you
+      // round them, you don't sail through them). The start line is passable.
+      for (const cp of welcome.course) {
+        if (cp.kind === "buoy") {
+          this.physics.collision.addObstacle({
+            x: cp.x,
+            z: cp.z,
+            radius: BOAT_RADIUS,
+          });
+        }
+      }
 
       // Guidance: a labelled beacon that floats over the next mark, plus a
       // fallback arrow above the boat for when that mark is off-screen.
@@ -276,10 +312,10 @@ export class Game {
     const back = 44 + row * 16;
     const side = (col - 1.5) * 14;
 
-    this.body.x = gate.x - forward.x * back + lateral.x * side;
-    this.body.z = gate.z - forward.y * back + lateral.y * side;
-    this.body.heading = angle;
-    this.body.speed = 0;
+    const px = gate.x - forward.x * back + lateral.x * side;
+    const pz = gate.z - forward.y * back + lateral.y * side;
+    this.body.setPose(px, pz, angle);
+    this.wake?.reset();
     this.snapCamera();
   }
 
@@ -302,8 +338,16 @@ export class Game {
 
     // 1. Local boat physics
     const input = this.controls.sample();
-    this.body.update(input, dt, WORLD.bounds);
+    this.physics.step(input, dt, time);
     this.applyLocalBoatTransform(input, time);
+    this.wake.update(
+      this.body.x,
+      this.body.z,
+      this.body.heading,
+      this.body.speed,
+      dt,
+      (x, z) => this.ocean.sample(x, z, time),
+    );
 
     // 2. Start line + checkpoints (speed mode)
     if (this.mode === "speed" && this.course) {
@@ -347,9 +391,11 @@ export class Game {
     this.ocean.update(time, this.camera.position);
     if (this.mode === "speed" && this.course) {
       this.course.floatOnWaves((x, z) => this.ocean.sample(x, z, time));
+      this.course.setLineRole(this.lineRole());
+      this.course.highlightNext(this.expectedCheckpoint);
       this.updateMarkIndicators(time);
     }
-    this.updateHud(now);
+    this.updateHud(now, time);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -418,7 +464,14 @@ export class Game {
       this.net.send({ type: "checkpoint", index: idx });
       this.expectedCheckpoint = (idx + 1) % this.course.count;
     }
-    this.course.highlightNext(this.expectedCheckpoint);
+  }
+
+  /** What the start/finish line currently means to this player. */
+  private lineRole(): "start" | "lap" | "finish" {
+    if (!this.hasStarted) return "start";
+    const me = this.race.standings.find((s) => s.id === this.localId);
+    const lap = me?.lap ?? 0;
+    return lap >= this.race.totalLaps ? "finish" : "lap";
   }
 
   private updateCamera(dt: number): void {
@@ -503,12 +556,11 @@ export class Game {
         markY + 24 + Math.sin(time * 3) * 0.6,
         target.z,
       );
-      // Counter-scale by distance so the label keeps a constant on-screen size,
-      // readable even from across the course.
+      // Scale naturally with perspective up close — so the label grows together
+      // with the mark as you approach (no conflicting depth cue) — but floor it
+      // when far so it never shrinks below a legible size.
       const camDist = this.camera.position.distanceTo(this.markBeacon.position);
-      this.markBeacon.scale.setScalar(
-        THREE.MathUtils.clamp(camDist / 140, 0.5, 10),
-      );
+      this.markBeacon.scale.setScalar(Math.max(1, camDist / BEACON_FLOOR_DIST));
       // Instruction + live distance to the mark (rounded so the texture is only
       // rebuilt when it visibly changes).
       const meters =
@@ -558,13 +610,19 @@ export class Game {
     mat.needsUpdate = true;
   }
 
-  private updateHud(now: number): void {
+  private updateHud(now: number, time: number): void {
     const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
     this.hud.setSpeed(this.body.speed, tuning.maxSpeed);
     this.hud.setPlayers(this.remotes.size + 1);
 
-    // Wind arrow points to wind direction relative to the boat heading.
-    const windAngle = Math.atan2(WIND_DIR.x, WIND_DIR.y) - this.body.heading;
+    // Wind arrow points to the *local* wind (which shifts and gusts), relative
+    // to the boat heading.
+    const wind = this.physics.environment.sample(
+      this.body.x,
+      this.body.z,
+      time,
+    ).wind;
+    const windAngle = Math.atan2(wind.x, wind.y) - this.body.heading;
     this.hud.setWind(windAngle);
 
     this.hud.setRace(this.race, this.localId, now);
@@ -632,8 +690,10 @@ function makeMarkBeacon(): THREE.Group {
       depthTest: false,
     }),
   );
+  // Base size is the floored (far-distance) on-screen size; it grows naturally
+  // as the beacon scales up close.
   label.position.y = 11;
-  label.scale.set(45, 14, 1);
+  label.scale.set(64, 20, 1);
   group.add(label);
 
   group.userData.label = label;

@@ -6,9 +6,21 @@ import { Checkpoint, WORLD } from "../protocol";
  * more turning buoys you round. Detects when the local boat reaches the mark it
  * is currently aiming for. Only used in speed mode.
  */
+/** The start/finish line means something different depending on race progress,
+ *  so it's recoloured: green before the start, white as a mid-race lap line,
+ *  gold on the final (finish) crossing. */
+export type LineRole = "start" | "lap" | "finish";
+const LINE_COLORS: Record<LineRole, { color: number; emissive: number }> = {
+  start: { color: 0x37d67a, emissive: 0x0e5a2e },
+  lap: { color: 0xeef3f7, emissive: 0x33414d },
+  finish: { color: 0xffd23f, emissive: 0x6b5200 },
+};
+
 export class Course {
   readonly group = new THREE.Group();
   private marks: THREE.Group[] = [];
+  private lineMats: THREE.MeshStandardMaterial[] = [];
+  private lineRole: LineRole | "" = "";
 
   get count(): number {
     return this.checkpoints.length;
@@ -48,14 +60,32 @@ export class Course {
       gate.add(pole);
     }
 
+    const bannerMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: new THREE.Color(0x000000),
+      roughness: 0.7,
+    });
     const banner = new THREE.Mesh(
       new THREE.BoxGeometry(half * 2, 3, 0.5),
-      new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.7 }),
+      bannerMat,
     );
     banner.position.set(0, 15, 0);
     gate.add(banner);
 
+    // Recoloured per race state by setLineRole().
+    this.lineMats.push(mat, bannerMat);
     return gate;
+  }
+
+  /** Colour the start/finish line for its current role (see {@link LineRole}). */
+  setLineRole(role: LineRole): void {
+    if (role === this.lineRole) return;
+    this.lineRole = role;
+    const c = LINE_COLORS[role];
+    for (const m of this.lineMats) {
+      m.color.setHex(c.color);
+      m.emissive.setHex(c.emissive);
+    }
   }
 
   /** A single bright turning buoy meant to be rounded, not passed through. */
@@ -90,16 +120,16 @@ export class Course {
     return buoy;
   }
 
-  /** Highlight the mark the player is currently heading for. */
+  /** Highlight the mark the player is heading for by making it glow — no size
+   *  change (a growing mark reads as confusing). */
   highlightNext(index: number): void {
     this.marks.forEach((mark, i) => {
       const active = i === index;
-      mark.scale.setScalar(active ? 1.12 : 1);
       mark.traverse((o) => {
         const mesh = o as THREE.Mesh;
         const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
         if (mat && mat.emissive) {
-          mat.emissiveIntensity = active ? 1.8 : 1;
+          mat.emissiveIntensity = active ? 2.4 : 0.5;
         }
       });
     });

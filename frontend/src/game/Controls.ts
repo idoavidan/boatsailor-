@@ -1,4 +1,4 @@
-import { BoatInput } from "./Boat";
+import { BoatInput } from "./physics";
 
 /**
  * Keyboard input → boat controls. WASD or arrow keys.
