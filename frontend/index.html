@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>⛵ Sail — Multiplayer Sailing</title>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <!-- Start menu -->
+    <div id="menu" class="overlay">
+      <div class="panel">
+        <h1>⛵ Sail</h1>
+        <p class="tagline">Multiplayer sailing — pick your waters</p>
+
+        <input id="name" type="text" placeholder="Captain name" maxlength="16" />
+
+        <div class="modes">
+          <button class="mode" data-mode="casual">
+            <span class="mode-emoji">🌊</span>
+            <span class="mode-title">Casual</span>
+            <span class="mode-desc">Free roam &amp; relax</span>
+          </button>
+          <button class="mode" data-mode="speed">
+            <span class="mode-emoji">🏁</span>
+            <span class="mode-title">Speed</span>
+            <span class="mode-desc">Race the course</span>
+          </button>
+        </div>
+
+        <button id="play">Set sail</button>
+        <p id="status" class="status"></p>
+      </div>
+    </div>
+
+    <!-- In-game HUD -->
+    <div id="hud" class="hidden">
+      <div id="topbar">
+        <div id="mode-badge" class="badge"></div>
+        <div id="players"></div>
+      </div>
+
+      <div id="wind">
+        <div id="wind-arrow">↑</div>
+        <span>wind</span>
+      </div>
+
+      <div id="race-banner" class="hidden"></div>
+      <div id="race-info" class="hidden"></div>
+      <div id="standings" class="hidden"></div>
+
+      <div id="speedo"></div>
+
+      <div id="controls-hint">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to sail
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
