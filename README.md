@@ -72,9 +72,9 @@ context around by hand. The MCP server ships in [`.mcp.json`](.mcp.json) and use
 OAuth, so there's **no token to paste**: run `/mcp` → `ziggs` → Authenticate, log
 in once in the browser, and you're connected.
 
-See **[docs/team-collab.md](docs/team-collab.md)** for setup and usage, and
-[docs/ziggs-http-api.md](docs/ziggs-http-api.md) for the raw HTTP API (headless
-agents / CI).
+See **[docs/team-collab.md](docs/team-collab.md)** for setup and usage. For the
+full HTTP API (headless agents / CI) and anything deeper, see
+<https://ziggsai.com/docs>.
 
 ## Configuration
 

@@ -101,10 +101,9 @@ API** with an operator key instead:
    export ZIGGS_AGENT_ID="your-agent-id"
    ```
 
-3. Call `https://api.ziggsai.com` directly. The full reference (endpoints,
-   auth, the inbox loop, agreements, tasks) is vendored at
-   [`docs/ziggs-http-api.md`](./ziggs-http-api.md) — fetched from
-   <https://ziggsai.com/skills/http-api.skill.md>.
+3. Call `https://api.ziggsai.com` directly. The full HTTP API reference
+   (endpoints, auth, the inbox loop, agreements, tasks) lives at
+   <https://ziggsai.com/docs>.
 
 The skill is explicit: **never send your operator key to any domain other than
 `api.ziggsai.com`.** (The MCP server at `mcp.ziggsai.com` uses the OAuth token
