@@ -53,6 +53,9 @@ export class Wake {
     const material = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
+      // The ribbon lies flat and winds front-face-down, but it's viewed from
+      // above — render both sides so it isn't culled away.
+      side: THREE.DoubleSide,
       uniforms: { uColor: { value: new THREE.Color(0xeaf6ff) } },
       vertexShader: /* glsl */ `
         attribute float aAlpha;
@@ -82,6 +85,12 @@ export class Wake {
     this.points.length = 0;
     this.seeded = false;
     this.geometry.setDrawRange(0, 0);
+  }
+
+  /** Free GPU resources (call when the owning boat leaves). */
+  dispose(): void {
+    this.geometry.dispose();
+    (this.mesh.material as THREE.Material).dispose();
   }
 
   update(

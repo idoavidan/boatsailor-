@@ -13,6 +13,7 @@ import { createBoatMesh } from "./Boat";
 import { Controls } from "./Controls";
 import { Course } from "./Course";
 import { Ocean } from "./Ocean";
+import { Ripples } from "./Ripples";
 import { Wake } from "./Wake";
 import {
   BoatState,
@@ -45,6 +46,7 @@ interface RemoteBoat {
   target: { x: number; z: number; heading: number; speed: number };
   renderHeading: number;
   color: number;
+  wake: Wake; // each boat trails its own foam
 }
 
 export class Game {
@@ -71,6 +73,7 @@ export class Game {
   private remotes = new Map<string, RemoteBoat>();
 
   private course: Course | null = null;
+  private ripples: Ripples | null = null;
   private markBeacon: THREE.Group | null = null;
   private beaconLabel: THREE.Sprite | null = null;
   private beaconText = "";
@@ -161,6 +164,10 @@ export class Game {
       this.course = new Course(welcome.course);
       this.scene.add(this.course.group);
 
+      // Foam rings around each stationary mark / gate base.
+      this.ripples = new Ripples(this.course.rippleSources());
+      this.scene.add(this.ripples.mesh);
+
       // Turning buoys are solid — register them as collision obstacles (you
       // round them, you don't sail through them). The start line is passable.
       for (const cp of welcome.course) {
@@ -239,11 +246,14 @@ export class Game {
     group.position.set(p.x, 0, p.z);
     group.add(makeLabel(p.name));
     this.scene.add(group);
+    const wake = new Wake();
+    this.scene.add(wake.mesh);
     this.remotes.set(p.id, {
       group,
       target: { x: p.x, z: p.z, heading: p.heading, speed: p.speed },
       renderHeading: p.heading,
       color: p.color,
+      wake,
     });
   }
 
@@ -264,6 +274,8 @@ export class Game {
     if (!remote) return;
     this.scene.remove(remote.group);
     disposeGroup(remote.group);
+    this.scene.remove(remote.wake.mesh);
+    remote.wake.dispose();
     this.remotes.delete(id);
   }
 
@@ -399,13 +411,25 @@ export class Game {
         r.group.position.z,
         time,
       );
+      // Trail foam behind it, just like the local boat.
+      r.wake.update(
+        r.group.position.x,
+        r.group.position.z,
+        r.renderHeading,
+        r.target.speed,
+        dt,
+        (x, z) => this.ocean.sample(x, z, time),
+      );
     }
 
     // 5. Camera, ocean, course markers, HUD
     this.updateCamera(dt);
     this.ocean.update(time, this.camera.position);
     if (this.mode === "speed" && this.course) {
-      this.course.floatOnWaves((x, z) => this.ocean.sample(x, z, time));
+      this.course.floatOnWaves((x, z, slope) =>
+        this.ocean.sample(x, z, time, slope),
+      );
+      this.ripples?.update(time, (x, z) => this.ocean.sample(x, z, time));
       this.course.setLineRole(this.lineRole());
       this.course.highlightNext(this.expectedCheckpoint);
       this.updateMarkIndicators(time);
@@ -752,7 +776,7 @@ export class Game {
     const awa = Math.acos(
       THREE.MathUtils.clamp(-(fx * wind.x + fz * wind.y) / ws, -1, 1),
     );
-    this.hud.setWind(fromAngle, awa < tuning.noGoAngle);
+    this.hud.setWind(fromAngle, this.body.heading, awa < tuning.noGoAngle);
     this.hud.setBoom(this.boomAngle);
 
     this.hud.setRace(this.race, this.localId, now);

@@ -45,10 +45,10 @@ const SIZE = 200;
 const MARK_SPAN = 0.62;
 /**
  * Handedness of the map's left/right axis. The map is a bird's-eye view with
- * the leg pointing up; +1 puts the boat's starboard side on the right (matching
- * the chase camera). Flip to -1 if it ever reads mirrored.
+ * the leg pointing up; -1 puts the boat's starboard side on the right, matching
+ * the chase camera (the +1 convention read mirrored against the 3D view).
  */
-const STARBOARD_SIGN = 1;
+const STARBOARD_SIGN = -1;
 
 export class Minimap {
   private canvas = byId("minimap") as HTMLCanvasElement;

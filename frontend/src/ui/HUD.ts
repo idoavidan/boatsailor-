@@ -1,5 +1,8 @@
 import { GameMode, RaceState } from "../protocol";
 
+/** How the wind dial is oriented (cycled by clicking the widget). */
+type WindMode = "bow" | "wind" | "compass";
+
 /**
  * The in-game heads-up display. Pure DOM, driven each frame by the Game.
  * Shows speed, player count, a wind compass, and (in speed mode) the race
@@ -12,11 +15,28 @@ export class HUD {
   private windEl = el("wind");
   private windDial = el("wind-dial");
   private windNeedle = el("wind-needle");
+  private windLabel = el("wind-label");
   private dialBoom = el("dial-boom");
   private banner = el("race-banner");
   private raceInfo = el("race-info");
   private standings = el("standings");
   private speedo = el("speedo");
+
+  /** Dial reference frame, cycled by clicking the widget:
+   *  - "bow": boat fixed pointing up, the wind needle orbits (default).
+   *  - "wind": wind pinned to the top, boat + polar spectrum rotate under it.
+   *  - "compass": world-up — the wind sits at its true bearing and the boat
+   *    turns against it, like a compass. */
+  private windMode: WindMode = loadWindMode();
+  /** Last needle + heading bearings (deg), kept so we can re-orient the dial. */
+  private lastNeedleDeg = 0;
+  private lastHeadingDeg = 0;
+
+  constructor() {
+    this.windEl.title = "Click: cycle bow-up / wind-up / compass";
+    this.windEl.addEventListener("click", () => this.cycleWindMode());
+    this.applyWindLabel();
+  }
 
   show(mode: GameMode): void {
     this.root.classList.remove("hidden");
@@ -59,16 +79,65 @@ export class HUD {
   }
 
   /**
-   * Orbit the wind arrow around the boat to the bearing the wind comes FROM
-   * (relative to the bow, up), where it points in toward the boat — so it reads
-   * as wind blowing onto you, and the colour under it is your speed. `inIrons`
-   * rings the dial red when you're pointing inside the no-go zone.
+   * Point the wind arrow at the bearing the wind comes FROM (relative to the
+   * bow), where it blows in toward the boat — so it reads as wind hitting you,
+   * and the colour under it is your speed. `inIrons` rings the dial red when
+   * you're pointing inside the no-go zone.
+   *
+   * The needle always carries its own rotation; each mode then spins the whole
+   * dial under it (see {@link applyDialRotation}), so the parts a mode wants
+   * pinned fall into place while the rest turn. Needs the boat heading for the
+   * compass (world-up) frame.
    */
-  setWind(fromAngle: number, inIrons: boolean): void {
+  setWind(fromAngle: number, heading: number, inIrons: boolean): void {
     // Negate so the dial's left/right matches the chase view (starboard right).
     const deg = (-fromAngle * 180) / Math.PI;
+    this.lastNeedleDeg = deg;
+    this.lastHeadingDeg = (heading * 180) / Math.PI;
     this.windNeedle.setAttribute("transform", `rotate(${deg} 50 50)`);
+    this.applyDialRotation();
     this.windEl.classList.toggle("in-irons", inIrons);
+  }
+
+  /** Cycle bow-up → wind-up → compass; remembered across sessions. */
+  private cycleWindMode(): void {
+    this.windMode =
+      this.windMode === "bow"
+        ? "wind"
+        : this.windMode === "wind"
+          ? "compass"
+          : "bow";
+    try {
+      localStorage.setItem("sail.windMode", this.windMode);
+    } catch {
+      // Private browsing / disabled storage — fine, just don't persist.
+    }
+    this.applyWindLabel();
+    this.applyDialRotation();
+  }
+
+  /**
+   * Rotate the whole dial (spectrum + boat + boom + needle) into the active
+   * frame. The needle's own rotation is already the wind's bearing off the bow,
+   * so: bow-up leaves the dial upright (needle orbits); wind-up spins it back by
+   * that bearing (needle ends at the top); compass spins it by −heading, so the
+   * boat turns to its world heading and the needle lands on the wind's true
+   * world bearing.
+   */
+  private applyDialRotation(): void {
+    let s = 0;
+    if (this.windMode === "wind") s = -this.lastNeedleDeg;
+    else if (this.windMode === "compass") s = -this.lastHeadingDeg;
+    this.windDial.style.transform = s ? `rotate(${s}deg)` : "";
+  }
+
+  private applyWindLabel(): void {
+    this.windLabel.textContent =
+      this.windMode === "wind"
+        ? "wind ↑"
+        : this.windMode === "compass"
+          ? "compass"
+          : "bow ↑";
   }
 
   /** Swing the dial's boom out to the trimmed side. `boomAngle` is the rig's
@@ -148,6 +217,17 @@ export class HUD {
       this.standings.className = "hidden";
     }
   }
+}
+
+/** Restore the saved dial orientation (defaults to bow-up). */
+function loadWindMode(): WindMode {
+  try {
+    const v = localStorage.getItem("sail.windMode");
+    if (v === "wind" || v === "compass") return v;
+  } catch {
+    // ignore
+  }
+  return "bow";
 }
 
 function formatTime(ms: number): string {

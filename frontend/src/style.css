@@ -195,6 +195,10 @@ body {
   text-transform: uppercase;
   letter-spacing: 1px;
   color: #eaf6ff;
+  /* Clickable to toggle bow-up / wind-up (the HUD is otherwise click-through). */
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
 }
 #wind-dial {
   position: relative;
