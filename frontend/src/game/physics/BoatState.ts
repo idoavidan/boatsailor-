@@ -16,6 +16,9 @@ export class BoatState {
   heading = 0;
   /** Yaw rate in rad/s. */
   angVel = 0;
+  /** Telemetry (written by SurfForce, read by the renderer): how strongly the
+   *  boat is riding a wave right now, 0 = not surfing … 1 = fully on the face. */
+  surf = 0;
 
   get x(): number {
     return this.pos.x;
@@ -42,5 +45,6 @@ export class BoatState {
     this.heading = heading;
     this.vel.set(0, 0);
     this.angVel = 0;
+    this.surf = 0;
   }
 }

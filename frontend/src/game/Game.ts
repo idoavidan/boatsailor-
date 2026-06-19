@@ -173,7 +173,18 @@ export class Game {
     sun.position.copy(SUN_DIR).multiplyScalar(500);
     this.scene.add(sun);
 
-    this.ocean = new Ocean(WORLD.bounds * 6, SKY_COLOR, SUN_DIR, WIND_DIR);
+    // Boat tuning feeds a world param: the waves march a bit faster than the
+    // boat's top speed so they overtake it and can be surfed. Pick tuning first.
+    const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
+    const waveCelerity = tuning.maxSpeed * 1.1; // just above top speed: easy to catch
+
+    this.ocean = new Ocean(
+      WORLD.bounds * 6,
+      SKY_COLOR,
+      SUN_DIR,
+      WIND_DIR,
+      waveCelerity,
+    );
     this.scene.add(this.ocean.mesh);
 
     // Faint curvy streaks drifting downwind, so the breeze direction reads off
@@ -182,11 +193,14 @@ export class Game {
     this.scene.add(this.windStreaks.mesh);
 
     // --- Local boat physics ---
-    const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
     const environment = new Environment(
       new WindField(WIND_DIR.clone(), 1),
       new CurrentField(), // off by default
       new WaveField((x, z, t, slope) => this.ocean.sample(x, z, t, slope)),
+      {
+        vel: this.ocean.swellDir.clone().multiplyScalar(this.ocean.swellCelerity),
+        sampler: (x, z, t, slope) => this.ocean.sampleSwell(x, z, t, slope),
+      },
     );
     const collision = new CollisionWorld(WORLD.bounds, BOAT_RADIUS);
     this.physics = new PhysicsWorld(tuning, environment, collision);
@@ -427,7 +441,8 @@ export class Game {
       this.body.x,
       this.body.z,
       this.body.heading,
-      this.body.speed,
+      // Throw a wider spray while surfing — a world-space cue you're on a wave.
+      this.body.speed * (1 + 0.5 * this.body.surf),
       dt,
       (x, z) => this.ocean.sample(x, z, time),
     );
@@ -918,6 +933,15 @@ export class Game {
     );
     this.hud.setWind(fromAngle, this.body.heading, awa < tuning.noGoAngle);
     this.hud.setBoom(this.boomAngle);
+
+    // Flow cue: surfing downwind (from the physics) or, when beating, how good
+    // your velocity-made-good to windward is — "in the groove".
+    const vmg = -(this.body.vel.x * wind.x + this.body.vel.y * wind.y) / ws;
+    const groove =
+      awa < tuning.noGoAngle + 0.7
+        ? THREE.MathUtils.clamp(vmg / (tuning.maxSpeed * 0.35), 0, 1)
+        : 0;
+    this.hud.setFlow(this.body.surf, groove);
 
     this.hud.setRace(this.race, this.localId, now);
   }

@@ -23,6 +23,8 @@ export interface EnvSample {
   current: THREE.Vector2; // water velocity
   waveHeight: number; // surface height at the point
   waveSlope: THREE.Vector2; // surface gradient (dh/dx, dh/dz)
+  swellVel: THREE.Vector2; // surf swell travel velocity (dir * celerity); constant per map
+  swellSlope: THREE.Vector2; // gradient of the surf swell layer alone (for the surf face gate)
 }
 
 /** Where forces deposit their contribution each substep. Cleared per substep. */

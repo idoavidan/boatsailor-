@@ -17,35 +17,48 @@ interface WaveLayer {
   offset: number; // angle off the wind direction
   freq: number;
   amp: number;
-  speed: number;
 }
-// Steepness (amp * freq) is what the physics climbs — the slope force scales
-// with it — so these are tuned steeper than a purely cosmetic sea would be,
-// while keeping the total height (~5.5) and the shortest wavelength (~42 units,
-// ≈ 4 mesh quads) so boats don't bob wildly and the surface stays smooth, not
-// faceted. Wavelengths (2π / freq) run ~114 → ~42 units, a few boat lengths, so
-// upwind you cross a face every couple of seconds — the slalom rhythm.
+// One coherent wave set. Layers are kept nearly co-directional (tiny offsets,
+// ~1–2°) so the crests run long and clean — a directional sea marching with the
+// wind, not a busy cross-hatch. They follow deep-water dispersion (longer waves
+// travel faster, c ∝ 1/√freq; see buildWaves), so the big surf wave leads and
+// the small chop rides slower on top — natural, and the ripples no longer zip.
+// The longest layer (first) sets the surf celerity and is the wave you surf
+// downwind. Steepness (amp * freq) is what the slope force climbs; shortest
+// λ ≈ 47 units (≈ 4 mesh quads) stays smooth on the mesh.
 const WAVE_LAYERS: WaveLayer[] = [
-  { offset: -0.01, freq: 0.055, amp: 2.6, speed: 1.6 }, // λ≈114, steepness .143
-  { offset: -0.16, freq: 0.08, amp: 1.5, speed: 1.9 }, //  λ≈79,  steepness .120
-  { offset: 0.15, freq: 0.11, amp: 0.9, speed: 2.1 }, //   λ≈57,  steepness .099
-  { offset: 0.04, freq: 0.15, amp: 0.5, speed: 2.5 }, //   λ≈42,  steepness .075
+  { offset: -0.015, freq: 0.044, amp: 4.5 }, // λ≈143, steepness .198 — surf wave
+  { offset: 0.02, freq: 0.065, amp: 2.4 }, //   λ≈97,  steepness .156
+  { offset: -0.03, freq: 0.095, amp: 1.3 }, //  λ≈66,  steepness .124
+  { offset: 0.035, freq: 0.135, amp: 0.6 }, //  λ≈47,  steepness .081
 ];
 
 /** Peak possible crest height (all waves in phase) — used to place foam. */
 const WAVE_MAX = WAVE_LAYERS.reduce((sum, w) => sum + w.amp, 0);
 
-/** Build the concrete wave set, rotating each layer off the wind direction. */
-function buildWaves(windDir: THREE.Vector2): WaveSpec[] {
+/** Rotate the (normalized) wind direction by an angular offset in the XZ plane. */
+function rotateOffWind(windDir: THREE.Vector2, offset: number): THREE.Vector2 {
   const w = windDir.clone().normalize();
+  const c = Math.cos(offset);
+  const s = Math.sin(offset);
+  return new THREE.Vector2(w.x * c - w.y * s, w.x * s + w.y * c);
+}
+
+/**
+ * Build the wave set, rotating each layer off the wind direction. `celerity` is
+ * the phase speed of the longest (first) layer — the surf wave; the rest follow
+ * deep-water dispersion (c ∝ 1/√freq), so longer waves move faster and the small
+ * chop rides slower on top rather than racing along with the big swell.
+ */
+function buildWaves(windDir: THREE.Vector2, celerity: number): WaveSpec[] {
+  const freq0 = WAVE_LAYERS[0].freq;
   return WAVE_LAYERS.map((l) => {
-    const c = Math.cos(l.offset);
-    const s = Math.sin(l.offset);
+    const c = celerity * Math.sqrt(freq0 / l.freq);
     return {
-      dir: new THREE.Vector2(w.x * c - w.y * s, w.x * s + w.y * c),
+      dir: rotateOffWind(windDir, l.offset),
       freq: l.freq,
       amp: l.amp,
-      speed: l.speed,
+      speed: c * l.freq, // speed = celerity * freq
     };
   });
 }
@@ -66,15 +79,26 @@ export class Ocean {
   readonly mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
   private waves: WaveSpec[];
+  /** The dominant (longest) wave, doubling as the surf reference. */
+  private surfRef: WaveSpec;
+  /** Travel direction of the surf reference wave (unit, XZ). */
+  readonly swellDir: THREE.Vector2;
+  /** Phase speed shared by the whole wave set, in world units/sec. */
+  readonly swellCelerity: number;
 
   constructor(
     size: number,
     skyColor: THREE.Color,
     sunDir: THREE.Vector3,
     windDir: THREE.Vector2,
+    waveCelerity: number,
   ) {
-    // Waves travel with the wind so the swell and the sailing line up.
-    this.waves = buildWaves(windDir);
+    // One coherent set marching with the wind at a single celerity, set a bit
+    // above boat speed so the waves overtake you and can be surfed downwind.
+    this.waves = buildWaves(windDir, waveCelerity);
+    this.surfRef = this.waves[0]; // the longest layer is the wave you surf
+    this.swellDir = this.surfRef.dir.clone();
+    this.swellCelerity = waveCelerity;
 
     // Generate the shader's wave accumulation from the same spec the JS sampler
     // uses, so rendering and physics can never drift.
@@ -248,5 +272,19 @@ export class Ocean {
       }
     }
     return h;
+  }
+
+  /**
+   * Height + slope of the dominant surf wave alone, used by the surf force to
+   * tell whether the boat is on its leading (downwind) face. Separate from
+   * {@link sample} because the smaller layers add slope noise that would make
+   * the on-the-face gate flicker.
+   */
+  sampleSwell(x: number, z: number, t: number, outSlope: THREE.Vector2): number {
+    const w = this.surfRef;
+    const phase = (w.dir.x * x + w.dir.y * z) * w.freq - t * w.speed;
+    const c = w.amp * w.freq * Math.cos(phase);
+    outSlope.set(c * w.dir.x, c * w.dir.y);
+    return w.amp * Math.sin(phase);
   }
 }

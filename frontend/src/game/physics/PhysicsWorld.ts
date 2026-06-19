@@ -7,6 +7,7 @@ import { Force } from "./forces/Force";
 import { HullForce } from "./forces/HullForce";
 import { SailForce } from "./forces/SailForce";
 import { SteeringForce } from "./forces/SteeringForce";
+import { SurfForce } from "./forces/SurfForce";
 import { WaveForce } from "./forces/WaveForce";
 import { PhysicsTuning } from "./tuning";
 import { BoatInput, ForceAccumulator } from "./types";
@@ -47,6 +48,7 @@ export class PhysicsWorld {
       new SteeringForce(tuning),
       new DriftForce(tuning),
       new WaveForce(tuning),
+      new SurfForce(tuning),
     ];
   }
 

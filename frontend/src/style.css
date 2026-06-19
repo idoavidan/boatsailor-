@@ -351,6 +351,29 @@ body {
   transition: width 0.1s linear;
 }
 
+/* Flow cue — surfing / in-the-groove pill, bottom-center. Intensity (0..1) is
+   passed in as --flow; colour is set inline by the HUD (cyan surf, green groove). */
+#flow-badge {
+  position: absolute;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%) scale(calc(0.9 + 0.12 * var(--flow, 0)));
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 16px;
+  white-space: nowrap;
+  background: rgba(8, 24, 36, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  text-shadow: 0 0 10px currentColor;
+  box-shadow: 0 0 calc(6px + 20px * var(--flow, 0)) rgba(255, 255, 255, 0.25);
+  opacity: calc(0.4 + 0.6 * var(--flow, 0));
+  pointer-events: none;
+  transition:
+    opacity 0.12s linear,
+    transform 0.12s linear;
+}
+
 /* ---------------- Touch controls ---------------- */
 /* Hidden by default; revealed only on touch devices while in-game (see the
    coarse-pointer media query below). */

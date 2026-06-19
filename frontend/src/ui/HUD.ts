@@ -20,6 +20,7 @@ export class HUD {
   private raceInfo = el("race-info");
   private standings = el("standings");
   private speedo = el("speedo");
+  private flow = el("flow-badge");
 
   /** Dial reference frame, cycled by clicking the widget:
    *  - "bow": boat fixed pointing up, the wind needle orbits (default).
@@ -143,6 +144,35 @@ export class HUD {
     // Same handedness flip as the needle, so the dial boom matches the boat's.
     const deg = (-boomAngle * 180) / Math.PI;
     this.dialBoom.setAttribute("transform", `rotate(${deg} 50 45)`);
+  }
+
+  /**
+   * Flow cue. `surf` (0..1) is how hard you're riding a wave downwind; `groove`
+   * (0..1) is how good your upwind VMG is. Surf wins when both are up; the pill
+   * brightens/scales with the value and is hidden when neither is happening.
+   */
+  setFlow(surf: number, groove: number): void {
+    let label = "";
+    let color = "";
+    let intensity = 0;
+    if (surf > 0.15) {
+      label = "🏄 Surfing";
+      color = "#7fe9ff";
+      intensity = Math.min(1, surf);
+    } else if (groove > 0.35) {
+      label = "⛵ In the groove";
+      color = "#9be870";
+      intensity = Math.min(1, groove);
+    }
+
+    if (!label) {
+      this.flow.classList.add("hidden");
+      return;
+    }
+    this.flow.textContent = label;
+    this.flow.style.color = color;
+    this.flow.style.setProperty("--flow", intensity.toFixed(2));
+    this.flow.classList.remove("hidden");
   }
 
   /** Update the race banner / lap / timer / standings for speed mode. */
