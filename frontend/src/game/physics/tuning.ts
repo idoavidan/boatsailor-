@@ -15,6 +15,9 @@ export interface PhysicsTuning {
   sailPower: number; // peak thrust at full throttle, on a reach, unit wind
   noGoAngle: number; // radians off dead-upwind before the sail starts to draw
   sailFloor: number; // residual drive in the no-go zone (so upwind is very slow)
+  windRefSpeed: number; // wind speed on the boat's velocity scale; sets how far the
+  // apparent wind swings forward as the boat speeds up. Lower = stronger apparent-
+  // wind effect (boat must foot more when fast, can point higher when slow).
 
   // Hull (water drag)
   forwardDrag: number; // resistance along the bow (with sailPower sets top speed)
@@ -41,6 +44,7 @@ export const CASUAL_TUNING: PhysicsTuning = {
   sailPower: 63, // 63 / 0.9 ≈ 70 top speed on a reach
   noGoAngle: 0.6, // ~34° — can't point closer than this to the wind
   sailFloor: 0.12, // forgiving: still creeps upwind
+  windRefSpeed: 105, // ≈ 1.5×maxSpeed: gentle apparent-wind swing. Lower to sharpen it.
   forwardDrag: 0.9,
   lateralDrag: 5,
   brakeDrag: 2.5,
@@ -49,7 +53,7 @@ export const CASUAL_TUNING: PhysicsTuning = {
   steerSpeedRef: 32,
   weatherHelm: 0.3,
   currentCoupling: 0, // current off until a map enables it
-  wavePush: 4,
+  wavePush: 12, // climbing a wave face now noticeably bleeds speed (was 4)
   maxSpeed: 70,
 };
 
@@ -59,6 +63,7 @@ export const SPEED_TUNING: PhysicsTuning = {
   sailPower: 99, // 99 / 0.9 = 110 top speed on a reach
   noGoAngle: 0.68, // ~39° — racier, punishes pinching harder
   sailFloor: 0.06, // dead upwind is nearly stalled — you must tack
+  windRefSpeed: 165, // ≈ 1.5×maxSpeed: gentle apparent-wind swing. Lower to sharpen it.
   forwardDrag: 0.9,
   lateralDrag: 6,
   brakeDrag: 3,
@@ -67,6 +72,6 @@ export const SPEED_TUNING: PhysicsTuning = {
   steerSpeedRef: 40,
   weatherHelm: 0.4,
   currentCoupling: 0,
-  wavePush: 4,
+  wavePush: 14, // climbing a wave face now noticeably bleeds speed (was 4)
   maxSpeed: 110,
 };

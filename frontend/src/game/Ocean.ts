@@ -19,11 +19,17 @@ interface WaveLayer {
   amp: number;
   speed: number;
 }
+// Steepness (amp * freq) is what the physics climbs — the slope force scales
+// with it — so these are tuned steeper than a purely cosmetic sea would be,
+// while keeping the total height (~5.5) and the shortest wavelength (~42 units,
+// ≈ 4 mesh quads) so boats don't bob wildly and the surface stays smooth, not
+// faceted. Wavelengths (2π / freq) run ~114 → ~42 units, a few boat lengths, so
+// upwind you cross a face every couple of seconds — the slalom rhythm.
 const WAVE_LAYERS: WaveLayer[] = [
-  { offset: -0.01, freq: 0.042, amp: 2.5, speed: 1.5 },
-  { offset: -0.16, freq: 0.061, amp: 1.4, speed: 1.8 },
-  { offset: 0.15, freq: 0.083, amp: 0.9, speed: 2.0 },
-  { offset: 0.04, freq: 0.1, amp: 0.4, speed: 2.5 },
+  { offset: -0.01, freq: 0.055, amp: 2.6, speed: 1.6 }, // λ≈114, steepness .143
+  { offset: -0.16, freq: 0.08, amp: 1.5, speed: 1.9 }, //  λ≈79,  steepness .120
+  { offset: 0.15, freq: 0.11, amp: 0.9, speed: 2.1 }, //   λ≈57,  steepness .099
+  { offset: 0.04, freq: 0.15, amp: 0.5, speed: 2.5 }, //   λ≈42,  steepness .075
 ];
 
 /** Peak possible crest height (all waves in phase) — used to place foam. */
@@ -99,12 +105,19 @@ export class Ocean {
         uWaveMax: { value: WAVE_MAX },
         uFogNear: { value: size * 0.12 },
         uFogFar: { value: size * 0.5 },
+        // Wind direction (XZ) + the two face tints, so the front face you climb
+        // into upwind reads differently from the back face you ride down.
+        uWindDir: { value: new THREE.Vector2(windDir.x, windDir.y).normalize() },
+        uFrontFace: { value: new THREE.Color(0x1f6f9e) }, // front (climb) — deeper azure
+        uBackFace: { value: new THREE.Color(0x74e6b0) }, // back (descend) — bright mint
+        uFaceTint: { value: 0.22 }, // 0 = off, ~0.4 = dramatic
       },
       vertexShader: /* glsl */ `
         uniform float uTime;
         varying vec3 vWorldPos;
         varying vec3 vNormal;
         varying float vWaveHeight;
+        varying vec2 vSlope;
 
         // One directional wave + its contribution to the surface slope.
         float wave(vec2 p, vec2 dir, float freq, float amp, float speed, out vec2 slope) {
@@ -125,6 +138,7 @@ export class Ocean {
           world.y += h;
 
           vec2 slope = ${slopeSum};
+          vSlope = slope; // pass the true gradient to the fragment for face tinting
           // Exaggerate the slope for the lighting normal ONLY (geometry + the JS
           // sampler keep the true height, so boats still sit right) so the wave
           // faces read as steep, sharply-lit lines.
@@ -146,9 +160,14 @@ export class Ocean {
         uniform float uWaveMax;
         uniform float uFogNear;
         uniform float uFogFar;
+        uniform vec2 uWindDir;
+        uniform vec3 uFrontFace;
+        uniform vec3 uBackFace;
+        uniform float uFaceTint;
         varying vec3 vWorldPos;
         varying vec3 vNormal;
         varying float vWaveHeight;
+        varying vec2 vSlope;
 
         void main() {
           vec2 q = vWorldPos.xz;
@@ -165,6 +184,13 @@ export class Ocean {
           // black (lots of ambient), so it stays clean and arcade.
           float diff = dot(normal, uSunDir) * 0.32 + 0.72;
           vec3 color = water * diff;
+
+          // Tint by which way the face leans relative to the wind. slope·windDir
+          // < 0 means the surface rises as you head upwind — the front face you
+          // climb (adverse); > 0 is the back face you ride down (favorable).
+          // Same test the wave slope force uses, so the colors match the physics.
+          float faceBlend = smoothstep(-0.05, 0.05, dot(vSlope, uWindDir));
+          color = mix(color, mix(uFrontFace, uBackFace, faceBlend), uFaceTint);
 
           // Sky reflection at grazing angles for a shiny water sheen.
           float fres = pow(1.0 - max(dot(viewDir, normal), 0.0), 4.0);
