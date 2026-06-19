@@ -153,34 +153,17 @@ body {
   z-index: 5;
 }
 
-#topbar {
-  position: absolute;
-  top: 18px;
-  left: 18px;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.badge {
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-weight: 700;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
-}
-.badge.speed {
-  background: rgba(255, 107, 107, 0.7);
-}
-.badge.casual {
-  background: rgba(46, 134, 222, 0.7);
-}
-
+/* Player count, tucked under the wind dial in small form. */
 #players {
-  padding: 7px 14px;
+  margin-top: 3px;
+  padding: 2px 9px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.3);
+  font-size: 11px;
   font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 #wind {
@@ -470,17 +453,26 @@ body {
   }
 }
 
-/* Touch devices: reveal the on-screen controls, shrink the minimap so it doesn't
-   crowd them, and nudge the player to landscape when they're holding the phone
-   upright. `body.playing` is set once the game starts, so nothing shows over the
-   menu. */
+/* Touch devices: reveal the on-screen controls and clear the bottom corners for
+   the thumbs — map to the top-left, wind to the top-right. `body.playing` is set
+   once the game starts, so nothing shows over the menu. */
 @media (pointer: coarse) {
   body.playing #touch-controls {
     display: block;
   }
   #minimap {
+    top: 16px;
+    left: 16px;
+    bottom: auto;
     width: 150px;
     height: 150px;
+  }
+  #wind {
+    top: 16px;
+    right: 16px;
+    bottom: auto;
+    left: auto;
+    transform: none;
   }
 }
 @media (pointer: coarse) and (orientation: portrait) {

@@ -1,4 +1,4 @@
-import { GameMode, RaceState } from "../protocol";
+import { RaceState } from "../protocol";
 
 /** How the wind dial is oriented (cycled by clicking the widget). */
 type WindMode = "bow" | "wind" | "compass";
@@ -10,7 +10,6 @@ type WindMode = "bow" | "wind" | "compass";
  */
 export class HUD {
   private root = el("hud");
-  private modeBadge = el("mode-badge");
   private players = el("players");
   private windEl = el("wind");
   private windDial = el("wind-dial");
@@ -38,10 +37,8 @@ export class HUD {
     this.applyWindLabel();
   }
 
-  show(mode: GameMode): void {
+  show(): void {
     this.root.classList.remove("hidden");
-    this.modeBadge.textContent = mode === "speed" ? "🏁 Speed" : "🌊 Casual";
-    this.modeBadge.className = `badge ${mode}`;
   }
 
   setPlayers(count: number): void {

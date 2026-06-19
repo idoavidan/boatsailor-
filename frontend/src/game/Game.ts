@@ -12,6 +12,7 @@ import { Minimap, MinimapBoat } from "../ui/Minimap";
 import { createBoatMesh } from "./Boat";
 import { Controls } from "./Controls";
 import { Course } from "./Course";
+import { Islands, IslandSpec } from "./Islands";
 import { Ocean } from "./Ocean";
 import { Ripples } from "./Ripples";
 import { Wake } from "./Wake";
@@ -55,6 +56,19 @@ const CREW_WEIGHT = 0.55; // the sailor's righting authority — i.e. their weig
 const CREW_MAX_HIKE = 1.7; // how far they can slide to the windward rail
 const CREW_HIKE_REF = 0.5; // heeling pressure at which they're fully hiked out
 
+// Casual-mode islands — fixed so every client agrees where the land is (they're
+// collision obstacles). Kept well clear of the origin spawn and the arena edge
+// (WORLD.bounds = 900).
+const CASUAL_ISLANDS: IslandSpec[] = [
+  { x: 380, z: 300, radius: 70 },
+  { x: -300, z: 460, radius: 55 },
+  { x: -490, z: -340, radius: 85 },
+  { x: 260, z: -520, radius: 60 },
+  { x: 630, z: -120, radius: 48 },
+  { x: -180, z: -240, radius: 38 },
+  { x: 540, z: 560, radius: 65 },
+];
+
 interface RemoteBoat {
   group: THREE.Group;
   target: { x: number; z: number; heading: number; speed: number };
@@ -72,6 +86,7 @@ export class Game {
 
   private ocean: Ocean;
   private windStreaks: WindStreaks;
+  private islands: Islands | null = null;
   private controls: Controls;
 
   private localId = "";
@@ -225,9 +240,19 @@ export class Game {
       this.scene.add(this.lobbyLabel);
     }
 
+    // --- Islands (casual mode only) ---
+    // Scattered land to sail around: decorative, and solid (you bump the beach).
+    if (this.mode === "casual") {
+      this.islands = new Islands(CASUAL_ISLANDS);
+      this.scene.add(this.islands.group);
+      for (const o of this.islands.obstacles) {
+        this.physics.collision.addObstacle(o);
+      }
+    }
+
     // --- Controls / HUD ---
     this.controls = new Controls(window);
-    this.hud.show(this.mode);
+    this.hud.show();
     this.hud.setPolar(
       (this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING).noGoAngle,
     );
