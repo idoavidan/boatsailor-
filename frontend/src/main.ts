@@ -17,6 +17,8 @@ menu.onPlay(async (choice) => {
     await net.connect();
     const welcome = await join(net, choice);
     menu.hide();
+    // Reveals the touch controls / rotate prompt (CSS gates them on this class).
+    document.body.classList.add("playing");
     new Game(net, canvas, welcome).start();
   } catch {
     menu.setStatus(

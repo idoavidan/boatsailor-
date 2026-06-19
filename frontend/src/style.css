@@ -385,3 +385,126 @@ kbd {
   font-family: inherit;
   font-size: 12px;
 }
+
+/* ---------------- Touch controls ---------------- */
+/* Hidden by default; revealed only on touch devices while in-game (see the
+   coarse-pointer media query below). */
+#touch-controls {
+  display: none;
+}
+
+.touch-cluster {
+  position: absolute;
+  bottom: 22px;
+  display: flex;
+  gap: 16px;
+  /* The cluster box is transparent to taps; only the buttons capture them. */
+  pointer-events: none;
+}
+.touch-cluster.left {
+  left: 22px;
+}
+.touch-cluster.right {
+  right: 22px;
+}
+
+.touch-btn {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 30px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(8, 24, 40, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(3px);
+  text-shadow: 0 1px 3px rgba(0, 20, 40, 0.6);
+  transition:
+    transform 0.05s ease,
+    background 0.05s ease;
+}
+.touch-btn small {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.touch-btn.active {
+  background: rgba(46, 134, 222, 0.7);
+  border-color: #fff;
+  transform: scale(0.93);
+}
+
+/* ---------------- Rotate-to-landscape notice ---------------- */
+#rotate-notice {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  text-align: center;
+  background: linear-gradient(160deg, #0b2235 0%, #06101a 100%);
+  color: #eaf6ff;
+}
+#rotate-notice h2 {
+  margin: 0;
+  font-size: 24px;
+}
+#rotate-notice p {
+  margin: 0;
+  max-width: 320px;
+  font-size: 15px;
+  line-height: 1.5;
+  opacity: 0.8;
+}
+.rotate-icon {
+  font-size: 60px;
+  animation: rotate-hint 1.8s ease-in-out infinite;
+}
+@keyframes rotate-hint {
+  0%,
+  35% {
+    transform: rotate(0deg);
+  }
+  65%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+/* Touch devices: swap the keyboard hint for on-screen controls, and nudge the
+   player to landscape when they're holding the phone upright. `body.playing` is
+   set once the game starts, so neither shows over the menu. */
+@media (pointer: coarse) {
+  #controls-hint {
+    display: none;
+  }
+  body.playing #touch-controls {
+    display: block;
+  }
+}
+@media (pointer: coarse) and (orientation: portrait) {
+  /* In portrait the rotate notice takes over; hide the controls beneath it. */
+  body.playing #touch-controls {
+    display: none;
+  }
+  body.playing #rotate-notice {
+    display: flex;
+  }
+}

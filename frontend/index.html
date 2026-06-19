@@ -75,6 +75,34 @@
       <div id="controls-hint">
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to sail
       </div>
+
+      <!-- On-screen controls for touch devices (shown in landscape). Steering on
+           the left thumb, sail power on the right. -->
+      <div id="touch-controls">
+        <div class="touch-cluster left">
+          <button class="touch-btn" id="touch-left" aria-label="Steer to port">
+            ◀<small>port</small>
+          </button>
+          <button class="touch-btn" id="touch-right" aria-label="Steer to starboard">
+            ▶<small>stbd</small>
+          </button>
+        </div>
+        <div class="touch-cluster right">
+          <button class="touch-btn" id="touch-brake" aria-label="Slow down">
+            ▼<small>slow</small>
+          </button>
+          <button class="touch-btn" id="touch-throttle" aria-label="Raise sail">
+            ▲<small>sail</small>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Portrait phones can't fit the controls — ask the player to rotate. -->
+    <div id="rotate-notice">
+      <div class="rotate-icon">📱</div>
+      <h2>Rotate your phone</h2>
+      <p>Turn your device sideways to sail — the on-screen controls live in landscape.</p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>
