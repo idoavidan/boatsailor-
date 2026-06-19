@@ -15,6 +15,7 @@ import { Course } from "./Course";
 import { Ocean } from "./Ocean";
 import { Ripples } from "./Ripples";
 import { Wake } from "./Wake";
+import { WindStreaks } from "./WindStreaks";
 import {
   BoatState,
   CASUAL_TUNING,
@@ -41,12 +42,26 @@ const BOAT_RADIUS = 6;
  *  closer than this it scales naturally with the mark it sits on. */
 const BEACON_FLOOR_DIST = 200;
 
+// --- Heel + crew-weight model (see Game.updateCrew). Arcade units. ----------
+// The wind heels the boat to leeward; the hull's form stability and the crew's
+// hiked-out weight right it. The sailor's weight is a genuine factor here:
+// drop CREW_WEIGHT to 0 and the boat heels nearly twice as far for the same
+// breeze.
+const HEEL_FROM_WIND = 2.0; // how hard the wind lays the boat over
+const HULL_STIFFNESS = 3.0; // form stability springing it back upright
+const HEEL_DAMP = 1.6; // roll damping, so the heel settles instead of snapping
+const ROLL_INERTIA = 1.0; // resistance to changing the heel rate
+const CREW_WEIGHT = 0.55; // the sailor's righting authority — i.e. their weight
+const CREW_MAX_HIKE = 1.7; // how far they can slide to the windward rail
+const CREW_HIKE_REF = 0.5; // heeling pressure at which they're fully hiked out
+
 interface RemoteBoat {
   group: THREE.Group;
   target: { x: number; z: number; heading: number; speed: number };
   renderHeading: number;
   color: number;
   wake: Wake; // each boat trails its own foam
+  flag: THREE.Object3D | null; // masthead burgee, yawed downwind each frame
 }
 
 export class Game {
@@ -56,6 +71,7 @@ export class Game {
   private clock = new THREE.Clock();
 
   private ocean: Ocean;
+  private windStreaks: WindStreaks;
   private controls: Controls;
 
   private localId = "";
@@ -68,7 +84,12 @@ export class Game {
   private wake!: Wake;
   private mainsail: THREE.Object3D | null = null;
   private jib: THREE.Object3D | null = null;
+  private crew: THREE.Object3D | null = null;
+  private flag: THREE.Object3D | null = null;
   private boomAngle = 0; // smoothed boom ease, radians (signed: leeward side)
+  private heel = 0; // current heel angle, radians (+ = heeled toward local +X)
+  private heelVel = 0; // heel rate, rad/s
+  private crewShift = 0; // sailor's lateral seat offset on deck (+X .. −X)
 
   private remotes = new Map<string, RemoteBoat>();
 
@@ -140,6 +161,11 @@ export class Game {
     this.ocean = new Ocean(WORLD.bounds * 6, SKY_COLOR, SUN_DIR, WIND_DIR);
     this.scene.add(this.ocean.mesh);
 
+    // Faint curvy streaks drifting downwind, so the breeze direction reads off
+    // the water. Decorative; follows the boat so the space stays filled.
+    this.windStreaks = new WindStreaks(WIND_DIR);
+    this.scene.add(this.windStreaks.mesh);
+
     // --- Local boat physics ---
     const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
     const environment = new Environment(
@@ -154,6 +180,8 @@ export class Game {
     this.boat = createBoatMesh(welcome.color);
     this.mainsail = this.boat.getObjectByName("mainsail") ?? null;
     this.jib = this.boat.getObjectByName("jib") ?? null;
+    this.crew = this.boat.getObjectByName("crew") ?? null;
+    this.flag = this.boat.getObjectByName("flag") ?? null;
     this.scene.add(this.boat);
 
     this.wake = new Wake();
@@ -254,6 +282,7 @@ export class Game {
       renderHeading: p.heading,
       color: p.color,
       wake,
+      flag: group.getObjectByName("flag") ?? null,
     });
   }
 
@@ -341,6 +370,7 @@ export class Game {
     const px = gate.x - forward.x * back + lateral.x * side;
     const pz = gate.z - forward.y * back + lateral.y * side;
     this.body.setPose(px, pz, angle);
+    this.heel = this.heelVel = this.crewShift = 0;
     this.wake?.reset();
     this.snapCamera();
   }
@@ -365,8 +395,9 @@ export class Game {
     // 1. Local boat physics
     const input = this.controls.sample();
     this.physics.step(input, dt, time);
-    this.applyLocalBoatTransform(input, time);
     this.updateRig(time);
+    this.updateCrew(time, dt);
+    this.applyLocalBoatTransform(input, time);
     this.wake.update(
       this.body.x,
       this.body.z,
@@ -425,6 +456,19 @@ export class Game {
     // 5. Camera, ocean, course markers, HUD
     this.updateCamera(dt);
     this.ocean.update(time, this.camera.position);
+    const windHere = this.physics.environment.sample(
+      this.body.x,
+      this.body.z,
+      time,
+    ).wind;
+    this.windStreaks.update(
+      this.body.x,
+      this.body.z,
+      windHere.x,
+      windHere.y,
+      dt,
+    );
+    this.updateFlags(windHere.x, windHere.y);
     if (this.mode === "speed" && this.course) {
       this.course.floatOnWaves((x, z, slope) =>
         this.ocean.sample(x, z, time, slope),
@@ -458,9 +502,10 @@ export class Game {
     const fwdSlope = this.waveSlope.x * Math.sin(h) + this.waveSlope.y * Math.cos(h);
     const rightSlope = this.waveSlope.x * Math.cos(h) - this.waveSlope.y * Math.sin(h);
     // Roll banks into the turn (same sign as the corrected rudder->heading);
-    // pitch/roll from the slope make the hull conform to the wave it's on.
+    // pitch/roll from the slope make the hull conform to the wave it's on; the
+    // heel lays it over to leeward (−this.heel: +heel dips the local +X rail).
     const turnRoll = input.rudder * 0.25 * (this.body.speed > 5 ? 1 : 0);
-    this.boat.rotation.set(-fwdSlope, h, rightSlope + turnRoll, "YXZ");
+    this.boat.rotation.set(-fwdSlope, h, rightSlope + turnRoll - this.heel, "YXZ");
   }
 
   /**
@@ -499,6 +544,76 @@ export class Game {
 
     this.mainsail.rotation.y = -Math.PI / 2 + this.boomAngle;
     if (this.jib) this.jib.rotation.y = Math.PI / 2 + this.boomAngle * 0.8;
+  }
+
+  /**
+   * Heel + crew weight. The wind lays the boat over to leeward; the crew hikes
+   * out to the windward rail (the side opposite the boom) and their weight rights
+   * it. Heel is integrated as a spring–damper torque balance so it settles and
+   * swings cleanly across the boat on a tack.
+   */
+  private updateCrew(time: number, dt: number): void {
+    if (!this.crew) return;
+    const wind = this.physics.environment.sample(
+      this.body.x,
+      this.body.z,
+      time,
+    ).wind;
+    const ws = Math.hypot(wind.x, wind.y);
+    const h = this.body.heading;
+
+    // Which side is leeward in the boat's local frame? The boat's local +X axis
+    // points to world (cos h, −sin h); the wind blows toward wind/ws. A positive
+    // projection means the wind (and so the boom) is on the +X side.
+    let leeward = 0;
+    let pressure = 0;
+    if (ws > 1e-3) {
+      const towardX = (wind.x / ws) * Math.cos(h) - (wind.y / ws) * Math.sin(h);
+      leeward = towardX >= 0 ? 1 : -1;
+      const tuning = this.mode === "speed" ? SPEED_TUNING : CASUAL_TUNING;
+      const power = THREE.MathUtils.clamp(this.body.speed / tuning.maxSpeed, 0, 1);
+      // Beam-on wind with the boat powered up heels it the most; in irons (wind
+      // on the bow) |towardX| → 0 and it stands upright.
+      pressure = ws * Math.abs(towardX) * (0.3 + 0.7 * power);
+    }
+
+    // Crew slides to windward (−leeward) as far as the pressure demands, capped
+    // at the rail; smoothed so a tack walks them across rather than teleporting.
+    const hike =
+      -leeward *
+      CREW_MAX_HIKE *
+      THREE.MathUtils.clamp(pressure / CREW_HIKE_REF, 0, 1);
+    this.crewShift += (hike - this.crewShift) * (1 - Math.exp(-dt * 6));
+
+    // Torque balance about the roll axis. crewShift is already signed toward
+    // windward, so CREW_WEIGHT * crewShift is the righting moment of their mass.
+    const windTorque = leeward * HEEL_FROM_WIND * pressure;
+    const crewTorque = CREW_WEIGHT * this.crewShift;
+    const hullTorque = -HULL_STIFFNESS * this.heel;
+    const dampTorque = -HEEL_DAMP * this.heelVel;
+    this.heelVel +=
+      ((windTorque + crewTorque + hullTorque + dampTorque) / ROLL_INERTIA) * dt;
+    this.heel = THREE.MathUtils.clamp(this.heel + this.heelVel * dt, -0.6, 0.6);
+
+    // Seat the sailor on the windward rail and hike the torso out over the water.
+    this.crew.position.x = this.crewShift;
+    const hikeFrac = Math.min(1, Math.abs(this.crewShift) / CREW_MAX_HIKE);
+    this.crew.rotation.z = leeward * 0.5 * hikeFrac;
+  }
+
+  /**
+   * Stream every masthead burgee downwind. The flag's fly is its local +X, so a
+   * world yaw of atan2(-windZ, windX) points it the way the wind blows; each flag
+   * sits inside its boat group, so we subtract that boat's heading to get the
+   * local yaw. Wind is near-uniform across the arena, so one bearing serves all.
+   */
+  private updateFlags(windX: number, windZ: number): void {
+    if (Math.hypot(windX, windZ) < 1e-4) return;
+    const downwind = Math.atan2(-windZ, windX);
+    if (this.flag) this.flag.rotation.y = downwind - this.body.heading;
+    for (const r of this.remotes.values()) {
+      if (r.flag) r.flag.rotation.y = downwind - r.renderHeading;
+    }
   }
 
   /** Track which side of the start line the boat is on and detect crossings. */
