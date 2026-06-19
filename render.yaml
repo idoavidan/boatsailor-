@@ -1,0 +1,17 @@
+# Render Blueprint — deploys Sail as a single free web service.
+# The backend builds and serves the three.js client and handles the WebSocket
+# game on the same origin. Connect the repo once in the Render dashboard; after
+# that, every push to the connected branch redeploys automatically.
+services:
+  - type: web
+    name: sail
+    runtime: node
+    plan: free
+    # --include=dev ensures vite/typescript (devDependencies) are available to
+    # build the frontend even if the build runs with NODE_ENV=production.
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start --workspace backend
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

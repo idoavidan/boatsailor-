@@ -2,8 +2,21 @@ import { ClientMessage, ServerMessage } from "../protocol";
 
 type Handler = (msg: ServerMessage) => void;
 
-const DEFAULT_URL =
-  import.meta.env.VITE_SERVER_URL ?? `ws://${location.hostname}:8080`;
+const DEFAULT_URL = import.meta.env.VITE_SERVER_URL ?? defaultServerUrl();
+
+/**
+ * Where to reach the game backend when VITE_SERVER_URL isn't set.
+ * In dev, Vite serves the client separately from the backend (which listens on
+ * :8080). In production the backend serves this page too, so the socket is
+ * same-origin — and must use `wss://` when the page is loaded over HTTPS.
+ */
+function defaultServerUrl(): string {
+  if (import.meta.env.DEV) {
+    return `ws://${location.hostname}:8080`;
+  }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}`;
+}
 
 /**
  * Thin typed wrapper around the game WebSocket. Buffers outgoing messages
