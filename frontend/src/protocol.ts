@@ -88,9 +88,15 @@ export const WORLD = {
   bounds: 900,
   /** Server snapshots broadcast per second. */
   tickRate: 20,
-  maxPlayersPerRoom: 8,
-  /** Distance at which a boat is considered to have passed a checkpoint gate. */
-  checkpointRadius: 28,
+  maxPlayersPerRoom: 16,
+  /** Rounding radius for a turning buoy: get this close to its centre and it
+   *  counts as rounded. Generous so a natural wide arc around the mark scores —
+   *  you don't have to shave it. (Only used for buoys; the start/finish line
+   *  uses startLineHalf + a crossing test.) */
+  checkpointRadius: 60,
+  /** Lateral half-width of the start/finish gate — the span you can cross
+   *  between the posts. Wider than the buoy radius so the line is long. */
+  startLineHalf: 60,
   totalLaps: 2,
   /** Seconds of "finding racers" lobby once a speed room has a player. */
   lobbySeconds: 8,
@@ -124,8 +130,9 @@ export const COURSE: Checkpoint[] = [
   { x: 0, z: 380, angle: Math.PI, kind: "buoy" },
 ];
 
-/** Hull colors handed out to players in join order. */
+/** Hull colors handed out to players in join order (16 distinct, one per slot). */
 export const PLAYER_COLORS = [
   0xff5252, 0x40c4ff, 0x69f0ae, 0xffd740, 0xff6ec7, 0xb388ff, 0xffab40,
-  0x18ffff,
+  0x18ffff, 0xff1744, 0x00e676, 0x2979ff, 0xf50057, 0xaeea00, 0xff9100,
+  0x00b8d4, 0xd500f9,
 ];

@@ -24,18 +24,15 @@ const CROSS_VARY = 0.004; // how fast the curl phase shifts across the wind
 // flows along each streak as it drifts through, rather than shimmering past.
 const FIELD_FLOW_FRAC = 0.55;
 
-// --- Gust field ---------------------------------------------------------------
-// A second, larger-scale field that pulses across space and time and multiplies
-// each streak's alpha. Whole patches of streaks fade out and swim back in like
-// gusts crossing the water — coherent (neighbours fade together), never a global
-// blink. Two layered waves keep it from being a regular on/off grid.
-const GUST_RATE = 0.6; // how fast patches pulse (rad/s)
-const GUST_LOW = 0.4; // gustiness below this is fully gone
-const GUST_HIGH = 0.72; // and at/above this it's full strength
-const GUST_U1 = 85; // patch wavelengths, layer 1 (downwind / cross-wind)
-const GUST_P1 = 70;
-const GUST_U2 = 115; // patch wavelengths, layer 2
-const GUST_P2 = 55;
+// --- Per-streak fade ----------------------------------------------------------
+// Each streak breathes on its OWN clock: a slow sine on a random phase and a
+// slightly random rate, so they fade out and back independently — one here, one
+// there — instead of whole patches (or the whole field) blinking together. The
+// fade window is narrow and sits near the sine's trough, so at any instant most
+// streaks are at full strength and only a few are dipping.
+const GUST_RATE = 0.5; // base breathe rate (rad/s); each streak varies around it
+const GUST_LOW = 0.12; // a streak is fully gone only near its personal trough
+const GUST_HIGH = 0.42; // and back to full strength above this
 
 /** One streak: just a start position + size. The *shape* comes from the field. */
 interface Streak {
@@ -44,6 +41,8 @@ interface Streak {
   alt: number; // altitude above the mean water (spreads them through the air)
   len: number; // length along the wind
   bright: number; // peak alpha (kept faint — these are "shy")
+  phase: number; // offset into its personal fade cycle (radians)
+  rate: number; // its personal fade rate (rad/s), so they desync
 }
 
 // Reused per stroke so the update loop allocates nothing.
@@ -102,6 +101,8 @@ export class WindStreaks {
         alt: 3 + Math.pow(Math.random(), 1.6) * 70,
         len: 45 + Math.random() * 70,
         bright: 0.32 + Math.random() * 0.3,
+        phase: Math.random() * Math.PI * 2,
+        rate: GUST_RATE * (0.6 + Math.random() * 0.8),
       });
     }
 
@@ -177,15 +178,10 @@ export class WindStreaks {
       const pCoord = s.x * px + s.z * pz;
       const crossPhase = pCoord * CROSS_VARY;
 
-      // Gust patch alpha for the whole stroke: two layered waves pulsing in
-      // space + time, so lines vanish and return together in patches.
-      const g1 =
-        0.5 + 0.5 * Math.sin(uCentre / GUST_U1 + pCoord / GUST_P1 + this.t * GUST_RATE);
-      const g2 =
-        0.5 +
-        0.5 *
-          Math.sin(uCentre / GUST_U2 - pCoord / GUST_P2 + this.t * GUST_RATE * 0.7 + 1.3);
-      const gust = smoothstep(GUST_LOW, GUST_HIGH, g1 * 0.6 + g2 * 0.4);
+      // Each streak fades on its own slow clock (random phase + rate), so only a
+      // few are dipping at any instant rather than whole patches at once.
+      const breathe = 0.5 + 0.5 * Math.sin(this.t * s.rate + s.phase);
+      const gust = smoothstep(GUST_LOW, GUST_HIGH, breathe);
       const strokeAlpha = edge * s.bright * gust;
 
       for (let k = 0; k <= SEG; k++) {

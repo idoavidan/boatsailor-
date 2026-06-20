@@ -36,7 +36,11 @@ const SUN_DIR = new THREE.Vector3(0.4, 0.85, 0.25).normalize();
 const WIND_DIR = new THREE.Vector2(0.7, 0.7).normalize();
 const SEND_RATE = WORLD.tickRate; // outgoing state messages per second
 /** Lateral reach of the start/finish line — matches the visible gate posts. */
-const START_LINE_HALF = WORLD.checkpointRadius;
+const START_LINE_HALF = WORLD.startLineHalf;
+/** Boats per row on the pre-start grid (rows fill back from the line). */
+const GRID_COLS = 4;
+/** Lateral spacing between grid columns, world units. */
+const GRID_COL_GAP = 14;
 /** Collision radius of a hull / buoy, in world units. */
 const BOAT_RADIUS = 6;
 /** Beyond this camera distance the mark beacon stops shrinking (stays legible);
@@ -110,6 +114,9 @@ export class Game {
 
   private course: Course | null = null;
   private ripples: Ripples | null = null;
+  /** Ring + pylon at every start-grid slot, shown pre-race so empty spawn
+   *  points are still findable. Each child floats on the swell each frame. */
+  private spawnMarkers: THREE.Group | null = null;
   private markBeacon: THREE.Group | null = null;
   private beaconLabel: THREE.Sprite | null = null;
   private beaconText = "";
@@ -252,6 +259,12 @@ export class Game {
       this.lobbyLabel = makeLobbyLabel();
       this.lobbyLabel.visible = false;
       this.scene.add(this.lobbyLabel);
+
+      // A ring + light pylon at every grid slot, so all spawn points are visible
+      // (and reachable) before the gun even when no boat is parked on them.
+      this.spawnMarkers = this.buildSpawnMarkers();
+      this.spawnMarkers.visible = false;
+      this.scene.add(this.spawnMarkers);
     }
 
     // --- Islands (casual mode only) ---
@@ -370,6 +383,12 @@ export class Game {
       this.hasStarted = false;
     }
 
+    // Show the spawn-point markers while the grid matters (lobby + pre-start),
+    // hide them once racing so they don't clutter the course.
+    if (this.spawnMarkers) {
+      this.spawnMarkers.visible = phase === "waiting" || phase === "countdown";
+    }
+
     // Boats stay controllable throughout (lobby and pre-start included).
     this.controls.setEnabled(true);
 
@@ -392,26 +411,97 @@ export class Game {
     this.startAhead = this.prevStartD >= 0;
   }
 
-  private placeOnStartGrid(): void {
-    if (!this.course) return;
-    const gate = this.course.checkpointPosition(0);
+  /**
+   * World pose of a start-grid slot. Slots fill in rows of GRID_COLS, each row
+   * set further back from the line. Kept clear of the line's capture radius so
+   * no one is credited the line the instant the race starts. Shared by the
+   * local-boat placement and the visible spawn markers so they always agree.
+   */
+  private gridSlotPose(slot: number): { x: number; z: number; angle: number } {
+    const gate = this.course!.checkpointPosition(0);
     const angle = this.startAngle();
     const forward = new THREE.Vector2(Math.sin(angle), Math.cos(angle));
     const lateral = new THREE.Vector2(Math.cos(angle), -Math.sin(angle));
 
-    const row = Math.floor(this.slot / 4);
-    const col = this.slot % 4;
-    // Keep every grid slot clear of the start line's capture radius so no one
-    // is credited the line the instant the race starts.
+    const row = Math.floor(slot / GRID_COLS);
+    const col = slot % GRID_COLS;
     const back = 44 + row * 16;
-    const side = (col - 1.5) * 14;
+    const side = (col - (GRID_COLS - 1) / 2) * GRID_COL_GAP;
 
-    const px = gate.x - forward.x * back + lateral.x * side;
-    const pz = gate.z - forward.y * back + lateral.y * side;
-    this.body.setPose(px, pz, angle);
+    return {
+      x: gate.x - forward.x * back + lateral.x * side,
+      z: gate.z - forward.y * back + lateral.y * side,
+      angle,
+    };
+  }
+
+  private placeOnStartGrid(): void {
+    if (!this.course) return;
+    const { x, z, angle } = this.gridSlotPose(this.slot);
+    this.body.setPose(x, z, angle);
     this.heel = this.heelVel = this.crewShift = 0;
     this.wake?.reset();
     this.snapCamera();
+  }
+
+  /** One marker per grid slot, parked at its pose; the local player's slot is
+   *  tinted in their hull colour so they can find their own spot. */
+  private buildSpawnMarkers(): THREE.Group {
+    const group = new THREE.Group();
+    for (let slot = 0; slot < WORLD.maxPlayersPerRoom; slot++) {
+      const pose = this.gridSlotPose(slot);
+      const marker = this.buildSpawnMarker(slot === this.slot);
+      marker.position.set(pose.x, 0, pose.z);
+      marker.rotation.y = pose.angle;
+      marker.userData.gx = pose.x;
+      marker.userData.gz = pose.z;
+      group.add(marker);
+    }
+    return group;
+  }
+
+  /** A flat water ring plus a thin glowing pylon, both unlit so they read as a
+   *  beacon on the surface rather than a lit object. */
+  private buildSpawnMarker(isLocal: boolean): THREE.Group {
+    const g = new THREE.Group();
+    const color = isLocal ? this.localColor : 0x8fe3ff;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(5, 7, 32),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: isLocal ? 0.85 : 0.45,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.4;
+    g.add(ring);
+
+    const pylon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.6, 0.6, 11, 8),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: isLocal ? 0.5 : 0.28,
+        depthWrite: false,
+      }),
+    );
+    pylon.position.y = 5.5;
+    g.add(pylon);
+    return g;
+  }
+
+  /** Ride the markers up and down on the swell, like the buoys, so they sit on
+   *  the visible water. Only worth doing while they're shown. */
+  private updateSpawnMarkers(time: number): void {
+    if (!this.spawnMarkers?.visible) return;
+    for (const m of this.spawnMarkers.children) {
+      const gx = m.userData.gx as number;
+      const gz = m.userData.gz as number;
+      m.position.y = this.ocean.sample(gx, gz, time);
+    }
   }
 
   /** Direction of travel through the start/finish gate (gate 0 -> gate 1). */
@@ -517,6 +607,7 @@ export class Game {
       this.course.setLineRole(this.lineRole());
       this.course.highlightNext(this.expectedCheckpoint);
       this.updateMarkIndicators(time);
+      this.updateSpawnMarkers(time);
       this.updateMinimap(time);
     }
     this.updateHud(now, time);

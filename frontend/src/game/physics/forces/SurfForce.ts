@@ -21,6 +21,14 @@ export class SurfForce implements Force {
   readonly name = "surf";
   /** Softness of the "on the leading face" gate, in swell-slope units. */
   private static readonly FACE_WIDTH = 0.02;
+  /** Catch window: you must already be moving along the swell at least
+   *  CATCH_LO·celerity to start picking it up, fully by CATCH_HI·celerity. */
+  private static readonly CATCH_LO = 0.45;
+  private static readonly CATCH_HI = 0.7;
+  /** Surf drives you to at most this fraction of the wave's own speed, never
+   *  matching it — so the crest keeps inching ahead, slides under you, and the
+   *  ride always ends. (Raise toward 1 for longer rides, lower for shorter.) */
+  private static readonly SPEED_CAP = 0.92;
   private fwd = new THREE.Vector2();
 
   constructor(private t: PhysicsTuning) {}
@@ -60,18 +68,32 @@ export class SurfForce implements Force {
     );
     if (headGate <= 0) return;
 
-    // On the face and pointed downwind = riding a wave (even once matched, when
-    // the pull below has faded). This is the surf signal the HUD/wake read.
-    boat.surf = faceGate * headGate;
-
-    // How much slower than the wave you are, along its travel direction. The
-    // wave only adds energy while you trail it — once you match it the pull is
-    // gone, so it can't drive you past the swell speed.
+    // You have to already be carrying speed along the swell to get picked up —
+    // like paddling up to wave speed. Below CATCH_LO·celerity it won't catch at
+    // all, so you can't surf from a near-standstill or while crossing the wave.
+    // This is the "needs speed *and* the right direction" gate.
     const along = boat.vel.x * dirX + boat.vel.y * dirY;
-    const deficit = celerity - along;
+    const catchGate = THREE.MathUtils.smoothstep(
+      along,
+      SurfForce.CATCH_LO * celerity,
+      SurfForce.CATCH_HI * celerity,
+    );
+    if (catchGate <= 0) return;
+
+    // On the face, pointed downwind, and up to speed = riding a wave (even once
+    // the pull below has faded). This is the surf signal the HUD/wake read.
+    boat.surf = faceGate * headGate * catchGate;
+
+    // Pull up toward a target just *under* the wave speed, never matching it, so
+    // the wave keeps overtaking you: the crest slides forward, passes under the
+    // hull onto the back face, and the ride ends — no surfing one swell forever
+    // (and some waves you'll simply miss).
+    const target = SurfForce.SPEED_CAP * celerity;
+    const deficit = target - along;
     if (deficit <= 0) return;
 
-    const f = this.t.surfCoupling * faceGate * headGate * deficit;
+    const f =
+      this.t.surfCoupling * faceGate * headGate * catchGate * deficit;
     acc.force.x += f * dirX;
     acc.force.y += f * dirY;
   }

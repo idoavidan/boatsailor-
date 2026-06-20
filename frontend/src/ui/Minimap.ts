@@ -202,7 +202,7 @@ export class Minimap {
       // Gate bar spanning the line's lateral axis (perpendicular to its angle).
       const lx = Math.cos(mk.angle);
       const lz = -Math.sin(mk.angle);
-      const half = WORLD.checkpointRadius;
+      const half = WORLD.startLineHalf;
       const g1 = project(mk.x + lx * half, mk.z + lz * half);
       const g2 = project(mk.x - lx * half, mk.z - lz * half);
       ctx.lineWidth = 3;

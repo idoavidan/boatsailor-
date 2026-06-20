@@ -33,7 +33,7 @@ export class Course {
   private marks: THREE.Group[] = [];
   private lineMats: THREE.MeshStandardMaterial[] = [];
   private lineRole: LineRole | "" = "";
-  private readonly half = WORLD.checkpointRadius;
+  private readonly half = WORLD.startLineHalf;
   private slope = new THREE.Vector2();
 
   get count(): number {
@@ -54,7 +54,7 @@ export class Course {
   /** Start/finish: two posts + a banner you sail between. */
   private buildStartLine(): THREE.Group {
     const gate = new THREE.Group();
-    const half = WORLD.checkpointRadius;
+    const half = WORLD.startLineHalf;
     const mat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: new THREE.Color(0xffffff).multiplyScalar(0.2),
