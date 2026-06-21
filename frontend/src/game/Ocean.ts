@@ -34,10 +34,10 @@ interface WaveLayer {
 // they texture the faces without crinkling them into busy noise — clean,
 // readable wavefronts.
 const WAVE_LAYERS: WaveLayer[] = [
-  { offset: -0.015, freq: 0.022, amp: 4.5 }, // λ≈286, steepness .099 — surf wave
-  { offset: 0.02, freq: 0.033, amp: 2.4 }, //   λ≈190, steepness .079
-  { offset: -0.03, freq: 0.048, amp: 0.8 }, //  λ≈131, steepness .038 — light chop
-  { offset: 0.035, freq: 0.068, amp: 0.3 }, //  λ≈92,  steepness .020 — light chop
+  { offset: -0.015, freq: 0.022, amp: 18.0 }, // λ≈286, steepness .396 — surf wave
+  { offset: 0.02, freq: 0.033, amp: 9.6 }, //   λ≈190, steepness .317
+  { offset: -0.03, freq: 0.048, amp: 3.2 }, //  λ≈131, steepness .154 — chop
+  { offset: 0.035, freq: 0.068, amp: 1.2 }, //  λ≈92,  steepness .082 — chop
 ];
 
 // Crest sharpness. The sine is reshaped into 2·gᵏ−1 with g = (sin+1)/2, which
