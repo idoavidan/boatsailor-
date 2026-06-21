@@ -16,6 +16,7 @@ import { Islands, IslandSpec } from "./Islands";
 import { Ocean } from "./Ocean";
 import { Ripples } from "./Ripples";
 import { Wake } from "./Wake";
+import { Wildlife } from "./Wildlife";
 import { WindStreaks } from "./WindStreaks";
 import {
   BoatState,
@@ -90,6 +91,7 @@ export class Game {
 
   private ocean: Ocean;
   private windStreaks: WindStreaks;
+  private wildlife: Wildlife;
   private islands: Islands | null = null;
   private controls: Controls;
 
@@ -151,6 +153,7 @@ export class Game {
     private net: Network,
     canvas: HTMLCanvasElement,
     welcome: Extract<ServerMessage, { type: "welcome" }>,
+    private onExit: () => void,
   ) {
     this.mode = welcome.mode;
     this.localId = welcome.id;
@@ -198,6 +201,11 @@ export class Game {
     // the water. Decorative; follows the boat so the space stays filled.
     this.windStreaks = new WindStreaks(WIND_DIR);
     this.scene.add(this.windStreaks.mesh);
+
+    // Ambient sea life — leaping dolphins, fish schools, drifting jellyfish.
+    // Decorative and client-local; rides the same wave surface as everything else.
+    this.wildlife = new Wildlife();
+    this.scene.add(this.wildlife.group);
 
     // --- Local boat physics ---
     const environment = new Environment(
@@ -290,6 +298,15 @@ export class Game {
 
     this.net.onMessage((m) => this.onMessage(m));
     window.addEventListener("resize", () => this.onResize());
+
+    // Both routes back to the menu: the always-on exit button and the post-race
+    // "Back to menu". The owner (main.ts) decides what leaving actually does.
+    document
+      .getElementById("exit-game")
+      ?.addEventListener("click", () => this.onExit());
+    document
+      .getElementById("race-over-menu")
+      ?.addEventListener("click", () => this.onExit());
   }
 
   start(): void {
@@ -382,6 +399,14 @@ export class Game {
       this.expectedCheckpoint = 0;
       this.hasStarted = false;
     }
+    if (phase === "finished" && this.prevPhase !== "finished") {
+      // Everyone's across the line: freeze the scene and show who won. The
+      // results stay up (the player leaves via "Back to menu"), so it doesn't
+      // matter that the server later resets the room to "waiting". Controls are
+      // released by the setEnabled guard below.
+      this.hud.showRaceOver(race, this.localId);
+      this.renderer.setAnimationLoop(null);
+    }
 
     // Show the spawn-point markers while the grid matters (lobby + pre-start),
     // hide them once racing so they don't clutter the course.
@@ -389,8 +414,9 @@ export class Game {
       this.spawnMarkers.visible = phase === "waiting" || phase === "countdown";
     }
 
-    // Boats stay controllable throughout (lobby and pre-start included).
-    this.controls.setEnabled(true);
+    // Boats stay controllable throughout (lobby and pre-start included), but
+    // not once the race is over and the results are up.
+    this.controls.setEnabled(phase !== "finished");
 
     this.prevPhase = phase;
   }
@@ -597,6 +623,9 @@ export class Game {
       windHere.x,
       windHere.y,
       dt,
+    );
+    this.wildlife.update(this.body.x, this.body.z, time, dt, (x, z) =>
+      this.ocean.sample(x, z, time),
     );
     this.updateFlags(windHere.x, windHere.y);
     if (this.mode === "speed" && this.course) {

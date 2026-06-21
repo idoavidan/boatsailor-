@@ -35,11 +35,25 @@ body {
   inset: 0;
   display: grid;
   place-items: center;
+  /* Gradient is a fallback shown until (or if) the live ocean canvas renders. */
   background: linear-gradient(160deg, #7ec8e3 0%, #2e86de 100%);
   z-index: 10;
 }
 
+/* The revolving ocean behind the start menu (filled by MenuBackground). Sits
+   under the panel and never intercepts taps. */
+#menu-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
 .panel {
+  position: relative; /* lift above the ocean canvas */
+  z-index: 1;
   width: min(440px, 92vw);
   padding: 36px 34px 28px;
   background: rgba(255, 255, 255, 0.92);
@@ -151,6 +165,32 @@ body {
   color: #fff;
   text-shadow: 0 2px 6px rgba(0, 20, 40, 0.5);
   z-index: 5;
+}
+
+/* Leave-the-game button, top-left. The HUD is click-through, so it opts back in. */
+#exit-game {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #eaf6ff;
+  background: rgba(8, 24, 40, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+  text-shadow: 0 1px 3px rgba(0, 20, 40, 0.6);
+  transition: background 0.12s ease;
+}
+#exit-game:hover {
+  background: rgba(46, 134, 222, 0.7);
+  border-color: #fff;
 }
 
 /* Player count, tucked under the wind dial in small form. */
@@ -309,6 +349,56 @@ body {
 #standings tr.you td {
   color: #ffd740;
   font-weight: 700;
+}
+
+/* ---------------- Post-race results ---------------- */
+#race-over .panel {
+  width: min(440px, 92vw);
+}
+#race-over h1 {
+  margin: 0;
+  font-size: 34px;
+  color: var(--ink);
+}
+#race-over-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 20px;
+}
+#race-over-table td {
+  padding: 9px 10px;
+  font-size: 18px;
+  color: var(--ink);
+  text-align: left;
+  border-bottom: 1px solid #e1ecf3;
+}
+#race-over-table td:first-child {
+  width: 34px;
+  text-align: center;
+}
+#race-over-table td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #4a6a82;
+}
+#race-over-table tr.you td {
+  color: var(--accent);
+  font-weight: 700;
+}
+#race-over-menu {
+  width: 100%;
+  padding: 14px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+#race-over-menu:hover {
+  background: #1f6fbf;
 }
 
 #minimap {
@@ -484,7 +574,8 @@ body {
     display: block;
   }
   #minimap {
-    top: 16px;
+    /* dropped below the top-left exit button */
+    top: 58px;
     left: 16px;
     bottom: auto;
     width: 150px;

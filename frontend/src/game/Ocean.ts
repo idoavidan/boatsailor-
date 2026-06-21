@@ -151,6 +151,12 @@ export class Ocean {
         uBackFace: { value: new THREE.Color(0x74e6b0) }, // back (descend) — bright mint
         uFlatFace: { value: new THREE.Color(0x49c5d4) }, // flat water between waves — cyan
         uFaceTint: { value: 0.22 }, // 0 = off, ~0.4 = dramatic
+        // Look-toward-the-sun crest glow + sky-gradient reflection + ripple
+        // shimmer. Set any strength to 0 to switch that trick off.
+        uSkyTop: { value: new THREE.Color(0x2a6cb0) }, // zenith tint for the reflected sky (matches the dome)
+        uSSS: { value: new THREE.Color(0x35dcc0) }, // translucent crest glow colour
+        uSSSStrength: { value: 0.6 }, // 0 = off, ~1 = vivid
+        uDetail: { value: 0.06 }, // micro-ripple normal strength (sparkle detail)
       },
       vertexShader: /* glsl */ `
         uniform float uTime;
@@ -210,15 +216,43 @@ export class Ocean {
         uniform vec3 uBackFace;
         uniform vec3 uFlatFace;
         uniform float uFaceTint;
+        uniform vec3 uSkyTop;
+        uniform vec3 uSSS;
+        uniform float uSSSStrength;
+        uniform float uDetail;
         varying vec3 vWorldPos;
         varying vec3 vNormal;
         varying float vWaveHeight;
         varying vec2 vSlope;
 
+        // Cheap hash + value noise, used to break up the foam edge and dapple the
+        // sun glitter so neither reads as a clean mathematical contour.
+        float hash21(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+        float vnoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+                     mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+                     u.y);
+        }
+
         void main() {
           vec2 q = vWorldPos.xz;
-          vec3 normal = normalize(vNormal);
           vec3 viewDir = normalize(uCameraPos - vWorldPos);
+
+          // Micro-ripple detail: fine crossed ripples perturb the LIGHTING normal
+          // only — the geometry and the JS height sampler are untouched, so boats
+          // still sit on the true surface. This dapples the big smooth faces and
+          // gives the specular below something to sparkle off.
+          vec2 micro = vec2(
+            cos(q.x * 0.45 + uTime * 1.3) + 0.7 * cos(q.y * 0.62 - uTime * 1.7),
+            cos(q.y * 0.41 - uTime * 1.1) + 0.7 * cos(q.x * 0.57 + uTime * 1.9));
+          vec3 normal = normalize(vNormal + vec3(micro.x, 0.0, micro.y) * uDetail);
 
           // Smooth height gradient: deep troughs, bright crests. The directional
           // swell makes this read as travelling wavefront lines.
@@ -247,21 +281,36 @@ export class Ocean {
           faceCol = mix(faceCol, uFrontFace, front);
           color = mix(color, faceCol, uFaceTint);
 
-          // Sky reflection at grazing angles for a shiny water sheen.
-          float fres = pow(1.0 - max(dot(viewDir, normal), 0.0), 4.0);
-          color = mix(color, uSky * 1.08, fres * 0.45);
+          // Subsurface glow: looking toward the sun, light scatters up through the
+          // thin water at the crests — a warm teal-green translucency that's the
+          // signature of good-looking water. Gated to crest tops (crestRise²) so
+          // the troughs stay deep and the glow doesn't wash the whole sea out.
+          float crestRise = clamp(vWaveHeight / uWaveMax, 0.0, 1.0);
+          float backlit = pow(max(dot(-viewDir, uSunDir), 0.0), 2.0);
+          color += uSSS * (crestRise * crestRise) * backlit * uSSSStrength;
 
-          // Tight sun sparkle — small glints rather than broad white smears.
-          // Kept restrained so the water reads clean rather than speckled.
+          // Sky reflection: bounce the view off the surface and read the sky
+          // gradient (lighter at the horizon, deeper overhead) rather than one
+          // flat colour, so the sheen has depth. Grazing angles reflect most.
+          float fres = pow(1.0 - max(dot(viewDir, normal), 0.0), 4.0);
+          vec3 refl = reflect(-viewDir, normal);
+          vec3 skyRefl = mix(uSky * 1.08, uSkyTop, clamp(refl.y, 0.0, 1.0));
+          color = mix(color, skyRefl, fres * 0.5);
+
+          // Sun glitter: a tight specular highlight chopped into dancing points by
+          // the noise mask, so the sun's path twinkles instead of smearing.
           vec3 halfDir = normalize(uSunDir + viewDir);
           float spec = pow(max(dot(normal, halfDir), 0.0), 200.0);
-          color += spec * 0.3 * vec3(1.0, 0.98, 0.9);
+          spec *= 0.5 + 0.9 * smoothstep(0.55, 0.85, vnoise(q * 0.7 + uTime * 0.4));
+          color += spec * 0.5 * vec3(1.0, 0.98, 0.9);
 
-          // Rare, crisp whitecaps only on the very tops of the tallest crests.
+          // Whitecaps on the very tops of the tallest crests, with a noise mask so
+          // the foam edge is ragged and organic rather than a clean contour.
           float crestH = vWaveHeight +
             (sin(q.x * 0.25 + uTime * 2.0) + sin(q.y * 0.22 - uTime * 1.7)) * 0.08;
           float foam = smoothstep(uWaveMax * 0.82, uWaveMax * 0.96, crestH);
-          color = mix(color, uFoam, foam * 0.85);
+          foam *= 0.55 + 0.45 * vnoise(q * 0.2 - uTime * 0.06);
+          color = mix(color, uFoam, foam * 0.9);
 
           // Distance haze toward the horizon.
           float dist = length(uCameraPos - vWorldPos);

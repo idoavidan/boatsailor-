@@ -1,4 +1,5 @@
 import { GameMode } from "../protocol";
+import { MenuBackground } from "./MenuBackground";
 
 export interface MenuChoice {
   name: string;
@@ -16,12 +17,17 @@ export class Menu {
   private statusEl: HTMLElement;
   private mode: GameMode = "casual";
   private busy = false;
+  private background: MenuBackground;
 
   constructor() {
     this.root = required("menu");
     this.nameInput = required<HTMLInputElement>("name");
     this.playBtn = required<HTMLButtonElement>("play");
     this.statusEl = required("status");
+
+    // Set the menu's revolving ocean going behind the panel.
+    this.background = new MenuBackground(required<HTMLCanvasElement>("menu-bg"));
+    this.background.start();
 
     const saved = localStorage.getItem("sail.name");
     if (saved) this.nameInput.value = saved;
@@ -69,6 +75,8 @@ export class Menu {
 
   hide(): void {
     this.root.classList.add("hidden");
+    // Stop revolving the ocean — the game's own scene takes over from here.
+    this.background.stop();
   }
 }
 

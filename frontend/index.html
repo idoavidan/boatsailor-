@@ -10,6 +10,9 @@
 
     <!-- Start menu -->
     <div id="menu" class="overlay">
+      <!-- Live ocean revolving behind the menu (see MenuBackground), so the
+           lobby looks like the game. Decorative; never captures taps. -->
+      <canvas id="menu-bg"></canvas>
       <div class="panel">
         <h1>⛵ Sail</h1>
         <p class="tagline">Multiplayer sailing — pick your waters</p>
@@ -36,6 +39,10 @@
 
     <!-- In-game HUD -->
     <div id="hud" class="hidden">
+      <!-- Leave the current game and return to the menu. -->
+      <button id="exit-game" aria-label="Leave and return to the menu">
+        ‹ Menu
+      </button>
       <div id="wind">
         <!-- polar speed gauge: red near the wind (slow/no-go) → green on a reach -->
         <div id="wind-dial">
@@ -91,6 +98,17 @@
             ▲<small>sail</small>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Post-race results: who won + final standings, shown once everyone has
+         crossed the finish line. "Back to menu" returns to the start screen. -->
+    <div id="race-over" class="overlay hidden">
+      <div class="panel">
+        <h1 id="race-over-title">Race over</h1>
+        <p id="race-over-sub" class="tagline">Final standings</p>
+        <table id="race-over-table"></table>
+        <button id="race-over-menu">Back to menu</button>
       </div>
     </div>
 

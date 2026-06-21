@@ -21,6 +21,9 @@ export class HUD {
   private standings = el("standings");
   private speedo = el("speedo");
   private flow = el("flow-badge");
+  private raceOver = el("race-over");
+  private raceOverTitle = el("race-over-title");
+  private raceOverTable = el("race-over-table");
 
   /** Dial reference frame, cycled by clicking the widget:
    *  - "bow": boat fixed pointing up, the wind needle orbits (default).
@@ -243,6 +246,27 @@ export class HUD {
     } else {
       this.standings.className = "hidden";
     }
+  }
+
+  /**
+   * Full-screen results once everyone has finished: who won up top, then the
+   * final order. Shown over the game and left up until the player heads back to
+   * the menu (so the server's room reset can't pull it out from under them).
+   */
+  showRaceOver(race: RaceState, localId: string): void {
+    const winner = race.standings[0];
+    if (!winner) return;
+    this.raceOverTitle.textContent =
+      winner.id === localId ? "🎉 You win!" : `🥇 ${escapeHtml(winner.name)} wins!`;
+    this.raceOverTable.innerHTML = race.standings
+      .map((s, i) => {
+        const time = s.finished ? formatTime(s.timeMs ?? 0) : "DNF";
+        const you = s.id === localId ? "you" : "";
+        return `<tr class="${you}"><td>${medal(i + 1)}</td>
+          <td>${escapeHtml(s.name)}</td><td>${time}</td></tr>`;
+      })
+      .join("");
+    this.raceOver.classList.remove("hidden");
   }
 }
 

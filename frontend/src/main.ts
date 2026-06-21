@@ -19,7 +19,10 @@ menu.onPlay(async (choice) => {
     menu.hide();
     // Reveals the touch controls / rotate prompt (CSS gates them on this class).
     document.body.classList.add("playing");
-    new Game(net, canvas, welcome).start();
+    // Leaving a game (exit button or post-race) does a full reset: drops the
+    // socket, tears down the WebGL scene, and brings the menu — and its live
+    // ocean — back on a clean slate.
+    new Game(net, canvas, welcome, () => location.reload()).start();
   } catch {
     menu.setStatus(
       "Couldn't reach the server — make sure the backend is running on :8080.",
